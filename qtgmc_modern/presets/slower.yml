@@ -1,0 +1,67 @@
+core:
+  motion_search:
+    tr: 2
+    rep: 4
+  initial_output:
+    tr: 2
+    rep: 0
+  final_output:
+    tr: 1
+    rep: 4
+
+interpolation:
+  deint:
+    name: 'znedi'
+    args:
+      nsize: 1
+      nns: 1
+  deint_chroma: null
+  ref: null
+
+motion_analysis:
+  searchpre: 3
+  subpel: 2
+  subpel_inter: 2
+  blocksize: 16
+  overlap: 8
+  search: 4
+  search_param: 2
+  pelsearch: 2
+  chroma_motion: true
+  # 
+  truemotion: false
+  lambda_: null
+  lsad: null
+  pnew: null
+  plevel: null
+  globalmotion: true
+  dct: 0
+  thsad_initial_output: 640
+  thsad_final_output: 256
+  thscd1: 180
+  thscd2: 98
+
+sharpness:
+  strength: 1.0
+  mode: 2
+  lmode: 2
+  lrad: 1
+  ovs: 0
+  vthin: 0.0
+  bb: 1
+
+source_match:
+  match: 0
+  lossless: 0
+  basic_deint:
+    name: 'znedi'
+    args:
+      nsize: 1
+      nns: 1
+  refined_deint:
+    name: 'znedi'
+    args:
+      nsize: 1
+      nns: 1
+  refined_tr: 1
+  enhance: 0.5
