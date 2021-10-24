@@ -1,92 +1,48 @@
 
 from __future__ import annotations
 
-from abc import ABC
-from functools import partial
 from types import MappingProxyType
-from typing import (Any, Callable, Dict, Literal, NamedTuple, Optional,
-                    Sequence, Tuple)
+from typing import Any, Callable, NamedTuple, Optional, Tuple
 
 import vapoursynth as vs
-from vsutil import Range, get_y, iterate, scale_value
-from vsutil.info import get_depth
 
-from .deinterlacers import Deinterlacer, class2dict, dict2class
+from .better_vsutil import (get_depth, get_neutral, get_num_planes, get_y,
+                            scale_value_full)
+from .deinterlacers import Deinterlacer, class2dict
 from .helper import clamp_value, merge_chroma
-from .logger import add_logger, log_update
-from .presets import CoreParam, Preset, Settings, load_preset
-
-# from .settings import CoreSettings, Preset, Settings
+from .logger import add_logger
+from .settings import CoreParam, InputType, Preset, Settings, load_preset
 
 core = vs.core
 
 
-# class QTGMCSettings(MutableMapping[str, Any], ABC):
-#     __default: Dict[str, Any]
-#     _settings: Dict[str, Any]
-
-#     def __init__(self, **kwargs: Any) -> None:
-#         self.__default = kwargs
-#         self._settings = kwargs
-#         super().__init__()
-
-#     def __getitem__(self, k: str) -> Any:
-#         return self._settings[k]
-
-#     def __setitem__(self, k: str, v: Any) -> None:
-#         if k in self._settings:
-#             self._settings[k] = v
-#         else:
-#             raise ValueError
-
-#     def __delitem__(self, v: str) -> None:
-#         self._settings[v] = self.__default[v]
-
-#     def __iter__(self) -> Iterator[str]:
-#         yield from self.__default
-
-#     def __len__(self) -> int:
-#         return self.__default.__len__()
-
-
-# class CoreSettings(QTGMCSettings):
-#     def __init__(self, tr0: int, tr1: int, tr2: int) -> None:
-#         super().__init__(**kwargs)
-
-
-# class _Interpolater(NamedTuple):
-#     deint: Deinterlacer
-
-
-class _TrueMotionVals(NamedTuple):
-    name: str
-    truemotion: float
-    not_truemotion: float
-
-
-# _Sections = Literal['core', 'interpolation', 'motion_analysis', 'sharpness', 'source_match']
-
-
 class QTGMC:
     _pclip: vs.VideoNode
-    tff: bool
+    _tff: bool
+    _input_type: InputType
     _settings: Settings
 
     # _core: None
-    show_info: bool
+    log_info: bool
     deint: Optional[Deinterlacer]
     deint_chroma: Optional[Deinterlacer]
     ref_deint: Optional[vs.VideoNode]
 
-    def __init__(self, clip: vs.VideoNode, preset: Preset = Preset.SLOWER, tff: bool = True, show_info: bool = True) -> None:
+    def __init__(
+        self, clip: vs.VideoNode,
+        preset: Preset = Preset.SLOWER, tff: bool = True,
+        input_type: InputType = InputType.INTERLACED_ONLY,
+        log_info: bool = True
+    ) -> None:
         self._pclip = clip
-        self.tff = tff
+        self._tff = tff
+        self._input_type = input_type
         self._settings = load_preset(preset)
         self.deint = None
         self.deint_chroma = None
         self.ref_deint = None
-        self.show_info = show_info
-        if show_info:
+        self.log_info = log_info
+        if log_info:
             add_logger()
 
     @property
@@ -150,6 +106,11 @@ class QTGMC:
         ma = self._settings['motion_analysis']
         ma.update(kwargs)  # type: ignore
 
+        class _TrueMotionVals(NamedTuple):
+            name: str
+            truemotion: float
+            not_truemotion: float
+
         tmvals = [
             _TrueMotionVals('lambda_', 1000 * ma['blocksize'] ** 2 // 64, 100 * ma['blocksize'] ** 2 // 64),
             _TrueMotionVals('lsad', 1200, 400),
@@ -207,18 +168,23 @@ def bob_shimmer_fix(clip: vs.VideoNode, ref: vs.VideoNode, rep: int, chroma: boo
     # rep range(0, 6)
     # Only support integer
     """
-    # Helper function: Compare processed clip with reference clip: only allow thin, horizontal areas of difference, i.e. bob shimmer fixes
-    # Rough algorithm: Get difference, deflate vertically by a couple of pixels or so, then inflate again. Thin regions will be removed
-    #                  by this process. Restore remaining areas of difference back to as they were in reference clip
+    Helper function: Compare processed clip with reference clip: only allow thin,
+    horizontal areas of difference, i.e. bob shimmer fixes
+
+    Rough algorithm: Get difference, deflate vertically by a couple of pixels or so, then inflate again.
+    Thin regions will be removed by this process.
+    Restore remaining areas of difference back to as they were in reference clip
     """
 
     pclip = get_y(clip) if not chroma else clip
 
-    # ed is the erosion distance - how much to deflate then reflate to remove thin areas of interest: 0 = minimum to 6 = maximum
-    # od is over-dilation level  - extra inflation to ensure areas to restore back are fully caught:  0 = none to 3 = one full pixel
+    # ed is the erosion distance - how much to deflate then reflate to remove thin areas of interest:
+    # 0 = minimum to 6 = maximum
+    # od is over-dilation level  - extra inflation to ensure areas to restore back are fully caught:
+    # 0 = none to 3 = one full pixel
     erosion = clamp_value(rep, 0, 6)
     # overdilatation = clamp_value(rep, 0, 3)
-    # If Rep < 10, then ed = Rep and od = 0, otherwise ed = 10s digit and od = 1s digit 
+    # If Rep < 10, then ed = Rep and od = 0, otherwise ed = 10s digit and od = 1s digit
     # (nasty method, but kept for compatibility with original TGMC)
     overdilatation = 0
 
@@ -261,8 +227,8 @@ def bob_shimmer_fix(clip: vs.VideoNode, ref: vs.VideoNode, rep: int, chroma: boo
 
     # Combine above areas to find those areas of difference to restore
     def _scale(x: int) -> int | float:
-        return scale_value(x, 8, get_depth(clip), Range.FULL, Range.FULL)
-    neutral = 1 << (get_depth(clip) - 1)  # if clip.format.sample_type == vs.INTEGER else 0.5
+        return scale_value_full(x, 8, get_depth(clip))
+    neutral = get_neutral(clip)
 
     restore = core.std.Expr([diff, choke1], f'x {_scale(129)} < x y {neutral} < {neutral} y ? ?')
     restore = core.std.Expr([restore, choke2], f'x {_scale(127)} > x y {neutral} > {neutral} y ? ?')
@@ -285,17 +251,58 @@ def extract_noise(clip: vs.VideoNode, interleaved_clip: vs.VideoNode, chroma: bo
 
     neutral = 1 << (get_depth(clip) - 1)
     randomnoise = interleaved_clip.std.SeparateFields(tff).std.BlankClip(
-        color=[neutral] * clip.format.num_planes
+        color=[neutral] * get_num_planes(clip)
     ).grain.Add(1800, 1800)
 
     diffnoise = core.std.MakeDiff(noisemax, noisemin, planes)
 
     def _scale(x: int) -> int | float:
-        return scale_value(x, 8, get_depth(clip), Range.FULL, Range.FULL)
+        return scale_value_full(x, 8, get_depth(clip))
     varrandom = core.std.Expr([diffnoise, randomnoise], f'x {neutral} - y * {_scale(256)} / {neutral} +')
     newnoise = core.std.MergeDiff(noisemin, varrandom, planes)
 
     return single_weave(core.std.Interleave([noise, newnoise]), tff)
+
+
+def make_lossless(clip: vs.VideoNode, src: vs.VideoNode, input_type: InputType, tff: bool = True) -> vs.VideoNode:
+    """
+    Insert the source lines into the result to create a true lossless output.
+    However, the other lines in the result have had considerable processing
+    and won't exactly match source lines.
+    There will be some slight residual combing.
+    Use vertical medians to clean a little of this away
+    """
+
+    # Weave the source fields and the "new" fields that have generated in the input
+    if input_type == InputType.INTERLACED_ONLY:
+        src_fields = src.std.SeparateFields(tff)
+    elif input_type == InputType.PROGRESSIVE_GENERIC:
+        raise ValueError('Lossless modes are incompatible with InputType=1')
+    else:
+        src_fields = src.std.SeparateFields(tff).std.SelectEvery(4, [0, 3])
+    new_fields = clip.std.SeparateFields(tff).std.SelectEvery(4, [1, 2])
+    processed = single_weave(
+        core.std.Interleave([src_fields, new_fields]).std.SelectEvery(4, [0, 1, 3, 2]), tff
+    )
+
+    # Clean some of the artefacts caused by the above - creating a second version of the "new" fields
+    vert_median = core.rgvs.VerticalCleaner(processed, 1)
+    vert_med_diff = core.std.MakeDiff(processed, vert_median)
+    vm_new_diff1 = vert_med_diff.std.SeparateFields(tff).std.SelectEvery(4, [1, 2])
+    neutral = get_neutral(clip)
+    vm_new_diff2 = core.std.Expr(
+        [vm_new_diff1.rgvs.VerticalCleaner(1), vm_new_diff1],
+        f'x {neutral} - y {neutral} - * 0 < {neutral} x {neutral} - abs y {neutral} - abs < x y ? ?'
+    )
+    vm_new_diff3 = core.rgvs.Repair(
+        vm_new_diff2, vm_new_diff2.rgvs.RemoveGrain(2), 1
+    )
+    # Reweave final result
+    return single_weave(
+        core.std.Interleave(
+            [src_fields, new_fields.std.MakeDiff(vm_new_diff3)]
+        ).std.SelectEvery(4, [0, 1, 3, 2]), tff
+    )
 
 
 def single_weave(clip: vs.VideoNode, tff: bool = True) -> vs.VideoNode:
