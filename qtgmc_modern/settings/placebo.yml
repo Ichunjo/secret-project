@@ -66,8 +66,18 @@ source_match:
   refined_tr: 1
   enhance: 0.5
 
-# denoise: null
-
-# identify_noise:
-#   denoiser: 'fft3df'
-#   use_mc: false
+noise:
+  mode: 2
+  denoiser:
+    name: 'fft3dfilter'
+    args: null
+  use_mc: false
+  tr: 1
+  strength: 2.0
+  chroma: false
+  restore_before_final: 0.3
+  restore_after_final: 0.1
+  deint:
+    name: 'DoubleWeave'
+    args: null
+  stabilise: false
