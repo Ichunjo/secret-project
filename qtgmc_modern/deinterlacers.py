@@ -6,9 +6,9 @@ import vapoursynth as vs
 from typing_extensions import Concatenate, ParamSpec
 from vsutil import Dither, depth, get_depth
 
-from .helper import inject_sclip
+from .helper import inject_param
 from .kernels import BicubicFC
-from .presets import DeinterlacerD
+from .settings import DeinterlacerD
 
 core = vs.core
 
@@ -26,7 +26,7 @@ class Deinterlacer(ABC):
         super().__init__()
 
     def __call__(self, clip: vs.VideoNode, field: int, **kwargs: Any) -> vs.VideoNode:
-        return self.deinterlacer()(clip, field, **self.params | kwargs)
+        return self.deinterlacer.__func__()(clip, field, **self.params | kwargs)
 
     def __str__(self) -> str:
         params = ', '.join(f'{k}={v}' for k, v in self.params.items())
@@ -40,6 +40,17 @@ class Deinterlacer(ABC):
 
 class _EdgeDirectedInterpolation(Deinterlacer, ABC):
     ...
+
+
+class _AcceptExternalDeintClip(Deinterlacer, ABC):
+    def __add__(self: _Deinterlacer, other: Deinterlacer) -> _Deinterlacer:
+        return self.__class__(external_deint_clip=other)
+
+
+class _EEDIX(_AcceptExternalDeintClip, ABC):
+    @inject_param(name='sclip')
+    def __call__(self, clip: vs.VideoNode, field: int, **kwargs: Any) -> vs.VideoNode:
+        return super().__call__(clip, field, **kwargs)
 
 
 class NNEDI3(_EdgeDirectedInterpolation):
@@ -59,27 +70,15 @@ class EEDI2(_EdgeDirectedInterpolation):
     deinterlacer = lambda: core.eedi2.EEDI2
 
 
-_EEDI3T = TypeVar('_EEDI3T', bound='_Injectable')
-
-
-class _Injectable(_EdgeDirectedInterpolation, ABC):
-    @inject_sclip
-    def __call__(self, clip: vs.VideoNode, field: int, **kwargs: Any) -> vs.VideoNode:
-        return super().__call__(clip, field, **kwargs)
-
-    def __add__(self: _EEDI3T, other: Deinterlacer) -> _EEDI3T:
-        return self.__class__(partial_sclip=other)
-
-
-class EEDI3(_Injectable):
+class EEDI3(_EEDIX):
     deinterlacer = lambda: core.eedi3.eedi3
 
 
-class EEDI3m(_Injectable):
+class EEDI3m(_EEDIX):
     deinterlacer = lambda: core.eedi3m.EEDI3
 
 
-class EEDI3mCL(_Injectable):
+class EEDI3mCL(_EEDIX):
     deinterlacer = lambda: core.eedi3m.EEDI3CL
 
 
@@ -97,8 +96,12 @@ class SangNom2(Deinterlacer):
         return super().__call__(clip, order, **self.params | kwargs)
 
 
-class BWDiF(Deinterlacer):
+class BWDiF(_AcceptExternalDeintClip):
     deinterlacer = lambda: core.bwdif.Bwdif
+
+    @inject_param(name='deint')
+    def __call__(self, clip: vs.VideoNode, field: int, **kwargs: Any) -> vs.VideoNode:
+        return super().__call__(clip, field, **kwargs)
 
 
 class Bob(Deinterlacer):
@@ -108,6 +111,7 @@ class Bob(Deinterlacer):
     def __init__(self, b: float = 0, c: float = 1/2) -> None:
         self.b = b
         self.c = c
+        super().__init__()
 
     def __call__(self, clip: vs.VideoNode, field: int, **kwargs: Any) -> vs.VideoNode:
         try:
