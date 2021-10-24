@@ -10,7 +10,8 @@ __all__ = [
 
     'Settings',
 
-    'SearchPre', 'SubPel', 'SubPelInter', 'Search', 'PLevel'
+    'SearchPre', 'SubPel', 'SubPelInter', 'Search', 'PLevel',
+    'InputType'
 ]
 
 from enum import IntEnum
@@ -112,24 +113,15 @@ if TYPE_CHECKING:
         # progressive
         # shutter speed motion blur framerate
 else:
-    # CoreParam = Any
-    # CoreSettings = Any
-    # DeinterlacerD = Any
-    # InterpolationSettings = Any
-    # MotionAnalysisSettings = Any
-    # SharpnessSettings = Any
-    # SourceMatchSettings = Any
-    # NoiseSettings = Any
-    # Settings = Any
-    class CoreParam(LoggedSettings): ...
-    class CoreSettings(LoggedSettings): ...
-    class DeinterlacerD(LoggedSettings): ...
-    class InterpolationSettings(LoggedSettings): ...
-    class MotionAnalysisSettings(LoggedSettings): ...
-    class SharpnessSettings(LoggedSettings): ...
-    class SourceMatchSettings(LoggedSettings): ...
-    class NoiseSettings(LoggedSettings): ...
-    class Settings(LoggedSettings): ...
+    class CoreParam(LoggedSettings): ...  # noqa E701
+    class CoreSettings(LoggedSettings): ...  # noqa E701
+    class DeinterlacerD(LoggedSettings): ...  # noqa E701
+    class InterpolationSettings(LoggedSettings): ...  # noqa E701
+    class MotionAnalysisSettings(LoggedSettings): ...  # noqa E701
+    class SharpnessSettings(LoggedSettings): ...  # noqa E701
+    class SourceMatchSettings(LoggedSettings): ...  # noqa E701
+    class NoiseSettings(LoggedSettings): ...  # noqa E701
+    class Settings(LoggedSettings): ...  # noqa E701
 
 # class PresetSettings(TypedDict):
 #     PLACEBO: Settings
@@ -146,6 +138,7 @@ else:
 
 
 # Enums
+# Motion Anal
 class SearchPre(IntEnum):
     """Pre-filtering for motion search clip"""
     NONE = 0
@@ -185,3 +178,11 @@ class PLevel(IntEnum):
     LINEAR = 1
     QUADRATIC = 2
     """Quadratic dependence from hierarchical level size"""
+
+
+# InputType
+class InputType(IntEnum):
+    INTERLACED_ONLY = 0
+    PROGRESSIVE_GENERIC = 1
+    PROGRESSIVE_VERYBAD = 2
+    PROGRESSIVE_VERYBAD_INV_FIELD = 3
