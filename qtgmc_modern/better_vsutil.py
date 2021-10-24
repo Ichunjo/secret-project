@@ -22,3 +22,11 @@ def scale_value_full(value: float | int, input_depth: int, output_depth: int) ->
 def get_num_planes(clip: VideoNode, /) -> int:
     assert clip.format
     return clip.format.num_planes
+
+
+@disallow_variable_format
+def is_444(clip: VideoNode, /) -> bool:
+    assert clip.format
+    if all([clip.format.subsampling_w == 0, clip.format.subsampling_h == 0]):
+        return True
+    return False
