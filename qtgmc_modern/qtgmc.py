@@ -305,5 +305,9 @@ def make_lossless(clip: vs.VideoNode, src: vs.VideoNode, input_type: InputType, 
     )
 
 
+def apply_source_match():
+    ...
+
+
 def single_weave(clip: vs.VideoNode, tff: bool = True) -> vs.VideoNode:
     return clip.std.DoubleWeave(tff)[::2]
