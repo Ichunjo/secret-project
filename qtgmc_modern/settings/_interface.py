@@ -1,7 +1,7 @@
 
 __all__ = [
     'CoreParam', 'CoreSettings',
-    'DeinterlacerD',
+    'VSCallableD',
     'InterpolationSettings',
     'MotionAnalysisSettings',
     'SharpnessSettings',
@@ -21,6 +21,10 @@ from ._abstract import LoggedSettings
 
 if TYPE_CHECKING:
     # Features / Settings dicts
+    class VSCallableD(TypedDict):
+        name: str
+        args: Optional[Dict[str, Any]]
+
 
     class CoreParam(TypedDict):
         tr: int
@@ -36,15 +40,9 @@ if TYPE_CHECKING:
         """Interpolated clip for inital output"""
         final_output: CoreParam
 
-
-    class DeinterlacerD(TypedDict):
-        name: str
-        args: Optional[Dict[str, Any]]
-
-
     class InterpolationSettings(TypedDict):
-        deint: DeinterlacerD
-        deint_chroma: Optional[DeinterlacerD]
+        deint: VSCallableD
+        deint_chroma: Optional[VSCallableD]
         ref: Optional[bool]
 
 
@@ -88,10 +86,10 @@ if TYPE_CHECKING:
         lossless: int
         """Lossless"""
 
-        basic_deint: DeinterlacerD
+        basic_deint: VSCallableD
         """MatchEdi"""
 
-        refined_deint: DeinterlacerD
+        refined_deint: VSCallableD
         """MatchEdi2"""
         refined_tr: int
         """MatchTR2"""
@@ -100,7 +98,16 @@ if TYPE_CHECKING:
 
 
     class NoiseSettings(TypedDict):
-        ...
+        mode: int
+        denoiser: VSCallableD
+        use_mc: bool
+        tr: int
+        strength: float
+        chroma: bool
+        restore_before_final: float
+        restore_after_final: float
+        deint: VSCallableD
+        stabilise: bool
 
 
     class Settings(TypedDict):
@@ -109,13 +116,15 @@ if TYPE_CHECKING:
         interpolation: InterpolationSettings
         sharpness: SharpnessSettings
         source_match: SourceMatchSettings
+
+        identify_noise: Optional[NoiseSettings]
         # noise
         # progressive
         # shutter speed motion blur framerate
 else:
+    class VSCallableD(LoggedSettings): ...  # noqa E701
     class CoreParam(LoggedSettings): ...  # noqa E701
     class CoreSettings(LoggedSettings): ...  # noqa E701
-    class DeinterlacerD(LoggedSettings): ...  # noqa E701
     class InterpolationSettings(LoggedSettings): ...  # noqa E701
     class MotionAnalysisSettings(LoggedSettings): ...  # noqa E701
     class SharpnessSettings(LoggedSettings): ...  # noqa E701
