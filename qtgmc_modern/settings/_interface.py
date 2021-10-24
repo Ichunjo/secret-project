@@ -117,7 +117,7 @@ if TYPE_CHECKING:
         sharpness: SharpnessSettings
         source_match: SourceMatchSettings
 
-        identify_noise: Optional[NoiseSettings]
+        noise: Optional[NoiseSettings]
         # noise
         # progressive
         # shutter speed motion blur framerate

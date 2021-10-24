@@ -1,6 +1,8 @@
 from enum import Enum
 from typing import Any, Dict, NamedTuple
 
+from ._interface import VSCallableD
+
 
 class NNEDI3Preset(Dict[str, Any], Enum):
     PLACEBO =    dict(nsize=1, nns=2)  # noqa: E222
@@ -28,6 +30,44 @@ class EEDI3Preset(Dict[str, Any], Enum):
     SUPERFAST =  dict(mdis=4)  # noqa: E222
     ULTRAFAST =  dict(mdis=4)  # noqa: E222
     DRAFT =      dict(mdis=4)  # noqa: E222
+
+
+class NoisePreset(Dict[str, Any], Enum):
+    SLOWER = dict(
+        denoiser=VSCallableD(name='dfttest', args=None),
+        use_mc=True,
+        tr=2,
+        deint=VSCallableD(name='generate', args=None),
+        stabilise=True
+    )
+    SLOW = dict(
+        denoiser=VSCallableD(name='dfttest', args=None),
+        use_mc=True,
+        tr=1,
+        deint=VSCallableD(name='bob', args=None),
+        stabilise=True
+    )
+    MEDIUM = dict(
+        denoiser=VSCallableD(name='dfttest', args=None),
+        use_mc=False,
+        tr=1,
+        deint=VSCallableD(name='DoubleWeave', args=None),
+        stabilise=True
+    )
+    FAST = dict(
+        denoiser=VSCallableD(name='fft3d', args=None),
+        use_mc=False,
+        tr=1,
+        deint=VSCallableD(name='DoubleWeave', args=None),
+        stabilise=False
+    )
+    FASTER = dict(
+        denoiser=VSCallableD(name='fft3d', args=None),
+        use_mc=False,
+        tr=0,
+        deint=VSCallableD(name='DoubleWeave', args=None),
+        stabilise=False
+    )
 
 
 class _P(NamedTuple):

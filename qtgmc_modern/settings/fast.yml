@@ -61,3 +61,5 @@ source_match:
   refined_deint: null
   refined_tr: 1
   enhance: 0.5
+
+noise: null

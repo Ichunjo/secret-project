@@ -67,3 +67,19 @@ source_match:
       nns: 2
   refined_tr: 1
   enhance: 0.5
+
+noise:
+  mode: 2
+  denoiser:
+    name: 'fft3d'
+    args: null
+  use_mc: false
+  tr: 1
+  strength: 2.0
+  chroma: false
+  restore_before_final: 0.3
+  restore_after_final: 0.1
+  deint:
+    name: 'doubleweave'
+    args: null
+  stabilise: false

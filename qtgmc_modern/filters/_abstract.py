@@ -5,15 +5,17 @@ from typing import Any, Callable, ClassVar, Dict, Protocol, Type, TypeVar, cast
 
 import vapoursynth as vs
 
-_VSFilter = TypeVar('_VSFilter', bound='VSFilter')
+from ..settings import VSCallableD
+
+_VSFilterT = TypeVar('_VSFilterT', bound='VSFilter')
 
 
-class Func(Protocol[vs.VideoNode]):
+class Func(Protocol):
     def __call__(self, clip: vs.VideoNode, *args: Any, **kwargs: Any) -> vs.VideoNode:
         ...
 
 
-class HasFunc(Protocol[Callable[[], Func]]):
+class HasFunc(Protocol):
     def __func__(self) -> Func:
         ...
 
@@ -39,5 +41,8 @@ class VSFilter(ABC):
     def get_func(self) -> Func:
         return cast(HasFunc, self.func).__func__()
 
-    def swap(self, new: Type[_VSFilter]) -> _VSFilter:
+    def swap(self, new: Type[_VSFilterT]) -> _VSFilterT:
         return new(**self.params)
+
+    def to_dict(self) -> VSCallableD:
+        return VSCallableD(name=self.__class__.__name__, args=self.params)

@@ -7,18 +7,20 @@ __all__ = [
     'SangNom2',
     'BWDiF',
     'Bob',
-    'dict2class', 'class2dict'
+
+    'NoiseDeint',
+    'NoiseDWeave', 'NoiseBob', 'NoiseGenerate'
 ]
 
-from abc import ABC
-from typing import Any, Dict, Type, TypeVar
+from abc import ABC, abstractmethod
+from typing import Any, TypeVar, cast
 
 import vapoursynth as vs
 from vsutil import Dither, depth, get_depth
 
+from ..better_vsutil import get_num_planes, scale_value_full
 from ..helper import inject_param
 from ..kernels import BicubicFC
-from ..settings import VSCallableD
 from ._abstract import VSFilter
 
 core = vs.core
@@ -118,22 +120,65 @@ class Bob(Deinterlacer):
         return depth(clip, bits, dither_type=Dither.NONE)
 
 
-def dict2class(dico: VSCallableD) -> Deinterlacer:
-    deints: Dict[str, Type[Deinterlacer]] = dict(
-        nnedi3=NNEDI3, nnedi3cl=NNEDI3CL, znedi3=ZNEDI3,
-        eedi2=EEDI2, eedi3=EEDI3, eedi3m=EEDI3m, eedi3mcl=EEDI3mCL,
-        sangnom2=SangNom2, bwdif=BWDiF, bob=Bob
-    )
-    if (kwargs := dico['args']) is None:
-        kwargs = {}
 
-    try:
-        clss = deints[dico['name']]
-    except KeyError as key_err:
-        raise ValueError from key_err
+class NoiseDeint(VSFilter, ABC):
 
-    return clss(**kwargs)
+    def __init__(self) -> None:
+        super().__init__()
+
+    @abstractmethod
+    def __call__(self, clip: vs.VideoNode, tff: bool = True, **kwargs: Any) -> vs.VideoNode:
+        ...
 
 
-def class2dict(deint: Deinterlacer) -> VSCallableD:
-    return VSCallableD(name=deint.__class__.__name__, args=deint.params)
+class NoiseDWeave(NoiseDeint):
+    def __call__(self, clip: vs.VideoNode, tff: bool = True, **kwargs: Any) -> vs.VideoNode:
+        return clip.std.SeparateFields(tff).std.DoubleWeave(tff)
+
+
+class NoiseBob(NoiseDeint):
+    b: float
+    c: float
+
+    def __init__(self, b: float = 0, c: float = 1/2) -> None:
+        self.b = b
+        self.c = c
+        super().__init__()
+
+    def __call__(self, clip: vs.VideoNode, tff: bool = True, **kwargs: Any) -> vs.VideoNode:
+        return Bob(self.b, self.c)(clip, tff)
+
+
+class NoiseGenerate(NoiseDeint):
+    def __call__(self, clip: vs.VideoNode, tff: bool = True, **kwargs: Any) -> vs.VideoNode:
+        """
+        Given noise extracted from an interlaced source (i.e. the noise is interlaced),
+        generate "progressive" noise with a new "field" of noise injected.
+        The new noise is centered on a weighted local average and uses the difference
+        between local min & max as an estimate of local variance
+        """
+        try:
+            interleaved_clip = cast(vs.VideoNode, kwargs.pop('interleaved_clip'))
+            chroma = cast(bool, kwargs.pop('chroma'))
+        except KeyError as key_error:
+            raise ValueError from key_error
+
+        planes = [0, 1, 2] if chroma else [0]
+
+        noise = clip.std.SeparateFields(tff)
+        noisemax = noise.std.Maximum(planes).std.Maximum(planes, coordinates=[0, 0, 0, 1, 1, 0, 0, 0])
+        noisemin = noise.std.Minimum(planes).std.Minimum(planes, coordinates=[0, 0, 0, 1, 1, 0, 0, 0])
+
+        neutral = 1 << (get_depth(clip) - 1)
+        randomnoise = interleaved_clip.std.SeparateFields(tff).std.BlankClip(
+            color=[neutral] * get_num_planes(clip)
+        ).grain.Add(1800, 1800)
+
+        diffnoise = core.std.MakeDiff(noisemax, noisemin, planes)
+
+        def _scale(x: int) -> float:
+            return scale_value_full(x, 8, get_depth(clip))
+        varrandom = core.std.Expr([diffnoise, randomnoise], f'x {neutral} - y * {_scale(256)} / {neutral} +')
+        newnoise = core.std.MergeDiff(noisemin, varrandom, planes)
+
+        return core.std.Interleave([noise, newnoise]).std.DoubleWeave(tff)[::2]

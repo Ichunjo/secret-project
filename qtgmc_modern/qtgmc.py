@@ -6,12 +6,13 @@ from typing import Any, Callable, NamedTuple, Optional, Tuple
 
 import vapoursynth as vs
 
-from .better_vsutil import (get_depth, get_neutral, get_num_planes, get_y,
-                            scale_value_full)
-from .deinterlacers import Deinterlacer, class2dict
+from .better_vsutil import get_depth, get_neutral, get_y, scale_value_full
+from .filters import (Deinterlacer, Denoiser, NoiseDeint, deintd2class,
+                      dend2class, noisedeintd2class)
 from .helper import clamp_value, merge_chroma
 from .logger import add_logger
-from .settings import CoreParam, InputType, Preset, Settings, load_preset
+from .settings import (CoreParam, InputType, NoisePreset, NoiseSettings,
+                       Preset, Settings, load_preset)
 
 core = vs.core
 
@@ -20,13 +21,16 @@ class QTGMC:
     _pclip: vs.VideoNode
     _tff: bool
     _input_type: InputType
+    _preset: Preset
     _settings: Settings
 
-    # _core: None
     log_info: bool
     deint: Optional[Deinterlacer]
     deint_chroma: Optional[Deinterlacer]
     ref_deint: Optional[vs.VideoNode]
+
+    denoiser: Optional[Denoiser]
+    noise_deint: Optional[NoiseDeint]
 
     def __init__(
         self, clip: vs.VideoNode,
@@ -37,10 +41,15 @@ class QTGMC:
         self._pclip = clip
         self._tff = tff
         self._input_type = input_type
+        self._preset = preset
         self._settings = load_preset(preset)
+
         self.deint = None
         self.deint_chroma = None
         self.ref_deint = None
+        self.denoiser = None
+        self.noise_deint = None
+
         self.log_info = log_info
         if log_info:
             add_logger()
@@ -64,6 +73,12 @@ class QTGMC:
     @property
     def source_match(self) -> MappingProxyType[str, Any]:
         return MappingProxyType(self._settings['source_match'])
+
+    @property
+    def noise(self) -> Optional[MappingProxyType[str, Any]]:
+        if (noise := self._settings['noise']) is None:
+            return None
+        return MappingProxyType(noise)
 
     @property
     def clip(self) -> vs.VideoNode:
@@ -93,10 +108,10 @@ class QTGMC:
         root = 'interpolation'
         inter = self._settings[root]
         if deint is not None:
-            inter['deint'] = class2dict(deint)
+            inter['deint'] = deint.to_dict()
             self.deint = deint
         if deint_chroma is not None:
-            inter['deint_chroma'] = class2dict(deint_chroma)
+            inter['deint_chroma'] = deint_chroma.to_dict()
             self.deint_chroma = deint_chroma
         if ref is not None:
             inter['ref'] = True
@@ -143,13 +158,62 @@ class QTGMC:
         if lossless is not None:
             sm['lossless'] = lossless
         if basic_deint is not None:
-            sm['basic_deint'] = class2dict(basic_deint)
+            sm['basic_deint'] = basic_deint.to_dict()
         if refined_deint is not None:
-            sm['refined_deint'] = class2dict(refined_deint)
+            sm['refined_deint'] = refined_deint.to_dict()
         if refined_tr is not None:
             sm['refined_tr'] = refined_tr
         if enhance is not None:
             sm['enhance'] = enhance
+
+    def set_noise(
+        self,
+        preset: NoisePreset = NoisePreset.FAST,
+        mode: Optional[int] = None,
+        denoiser: Optional[Denoiser] = None,
+        use_mc: Optional[bool] = None,
+        tr: Optional[int] = None,
+        strength: Optional[float] = None,
+        chroma: Optional[bool] = None,
+        restore_before_final: Optional[float] = None,
+        restore_after_final: Optional[float] = None,
+        deint: Optional[NoiseDeint] = None,
+        stabilise: Optional[bool] = None
+    ) -> None:
+        noise = self._settings['noise']
+        if not noise:
+            noise = NoiseSettings(
+                mode=0, strength=2.0, chroma=False,
+                restore_before_final=0.3 if self._preset.i <= 1 else 0.,
+                restore_after_final=0.1 if self._preset.i <= 1 else 0.,
+                **NoisePreset.FAST
+            )
+            self.denoiser = None
+            self.noise_deint = None
+        if preset is not None:
+            noise.update(preset)  # type: ignore
+        if mode is not None:
+            noise['mode'] = mode
+        if denoiser is not None:
+            self.denoiser = denoiser
+            noise['denoiser'] = denoiser.to_dict()
+        if use_mc is not None:
+            noise['use_mc'] = use_mc
+        if tr is not None:
+            noise['tr'] = tr
+        if strength is not None:
+            noise['strength'] = strength
+        if chroma is not None:
+            noise['chroma'] = chroma
+        if restore_before_final is not None:
+            noise['restore_before_final'] = restore_before_final
+        if restore_after_final is not None:
+            noise['restore_after_final'] = restore_after_final
+        if deint is not None:
+            self.noise_deint = deint
+            noise['deint'] = deint.to_dict()
+        if stabilise is not None:
+            noise['stabilise'] = stabilise
 
 
 def interpolate(clip: vs.VideoNode, tff: bool, deint: Deinterlacer,
@@ -234,34 +298,6 @@ def bob_shimmer_fix(clip: vs.VideoNode, ref: vs.VideoNode, rep: int, chroma: boo
     restore = core.std.Expr([restore, choke2], f'x {_scale(127)} > x y {neutral} > {neutral} y ? ?')
     mergediff = core.std.MergeDiff(clip, restore)
     return mergediff if chroma else merge_chroma(mergediff, clip)
-
-
-def extract_noise(clip: vs.VideoNode, interleaved_clip: vs.VideoNode, chroma: bool = False, tff: bool = True) -> vs.VideoNode:
-    """
-    Given noise extracted from an interlaced source (i.e. the noise is interlaced),
-    generate "progressive" noise with a new "field" of noise injected.
-    The new noise is centered on a weighted local average and uses the difference
-    between local min & max as an estimate of local variance
-    """
-    planes = [0, 1, 2] if chroma else [0]
-
-    noise = clip.std.SeparateFields(tff)
-    noisemax = noise.std.Maximum(planes).std.Maximum(planes, coordinates=[0, 0, 0, 1, 1, 0, 0, 0])
-    noisemin = noise.std.Minimum(planes).std.Minimum(planes, coordinates=[0, 0, 0, 1, 1, 0, 0, 0])
-
-    neutral = 1 << (get_depth(clip) - 1)
-    randomnoise = interleaved_clip.std.SeparateFields(tff).std.BlankClip(
-        color=[neutral] * get_num_planes(clip)
-    ).grain.Add(1800, 1800)
-
-    diffnoise = core.std.MakeDiff(noisemax, noisemin, planes)
-
-    def _scale(x: int) -> int | float:
-        return scale_value_full(x, 8, get_depth(clip))
-    varrandom = core.std.Expr([diffnoise, randomnoise], f'x {neutral} - y * {_scale(256)} / {neutral} +')
-    newnoise = core.std.MergeDiff(noisemin, varrandom, planes)
-
-    return single_weave(core.std.Interleave([noise, newnoise]), tff)
 
 
 def make_lossless(clip: vs.VideoNode, src: vs.VideoNode, input_type: InputType, tff: bool = True) -> vs.VideoNode:
