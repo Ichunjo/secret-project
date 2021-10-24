@@ -8,7 +8,7 @@ from vsutil import Dither, depth, get_depth
 
 from .helper import inject_param
 from .kernels import BicubicFC
-from .settings import DeinterlacerD
+from .settings import VSCallableD
 
 core = vs.core
 
@@ -34,7 +34,7 @@ class Deinterlacer(ABC):
 
     __repr__ = __str__
 
-    def swap_deint(self, deint: Type[_Deinterlacer]) -> _Deinterlacer:
+    def swap(self, deint: Type[_Deinterlacer]) -> _Deinterlacer:
         return deint(**self.params)
 
 
@@ -125,7 +125,7 @@ class Bob(Deinterlacer):
         return depth(clip, bits, dither_type=Dither.NONE)
 
 
-def dict2class(dico: DeinterlacerD) -> Deinterlacer:
+def dict2class(dico: VSCallableD) -> Deinterlacer:
     deints: Dict[str, Type[Deinterlacer]] = dict(
         nnedi3=NNEDI3, nnedi3cl=NNEDI3CL, znedi3=ZNEDI3,
         eedi2=EEDI2, eedi3=EEDI3, eedi3m=EEDI3m, eedi3mcl=EEDI3mCL,
@@ -142,5 +142,5 @@ def dict2class(dico: DeinterlacerD) -> Deinterlacer:
     return clss(**kwargs)
 
 
-def class2dict(deint: Deinterlacer) -> DeinterlacerD:
-    return DeinterlacerD(name=deint.__class__.__name__, args=deint.params)
+def class2dict(deint: Deinterlacer) -> VSCallableD:
+    return VSCallableD(name=deint.__class__.__name__, args=deint.params)
