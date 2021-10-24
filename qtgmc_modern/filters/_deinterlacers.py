@@ -1,41 +1,34 @@
 
+__all__ = [
+    'Deinterlacer',
+    'NNEDI3', 'NNEDI3CL', 'ZNEDI3', 'ZNEDI3',
+    'EEDI2',
+    'EEDI3', 'EEDI3m', 'EEDI3mCL',
+    'SangNom2',
+    'BWDiF',
+    'Bob',
+    'dict2class', 'class2dict'
+]
+
 from abc import ABC
-from typing import Any, Callable, ClassVar, Dict, Type, TypeVar
+from typing import Any, Dict, Type, TypeVar
 
 import vapoursynth as vs
-from typing_extensions import Concatenate, ParamSpec
 from vsutil import Dither, depth, get_depth
 
-from .helper import inject_param
-from .kernels import BicubicFC
-from .settings import VSCallableD
+from ..helper import inject_param
+from ..kernels import BicubicFC
+from ..settings import VSCallableD
+from ._abstract import VSFilter
 
 core = vs.core
 
-_P = ParamSpec('_P')
-_DeintFuncType = Callable[Concatenate[vs.VideoNode, int, _P], vs.VideoNode]
 _Deinterlacer = TypeVar('_Deinterlacer', bound='Deinterlacer')
 
 
-class Deinterlacer(ABC):
-    params: Dict[str, Any]
-    deinterlacer: ClassVar[Callable[[], _DeintFuncType]]
-
-    def __init__(self, **kwargs: Any) -> None:
-        self.params = kwargs
-        super().__init__()
-
+class Deinterlacer(VSFilter, ABC):
     def __call__(self, clip: vs.VideoNode, field: int, **kwargs: Any) -> vs.VideoNode:
-        return self.deinterlacer.__func__()(clip, field, **self.params | kwargs)
-
-    def __str__(self) -> str:
-        params = ', '.join(f'{k}={v}' for k, v in self.params.items())
-        return f'{self.__class__.__name__}({params})'
-
-    __repr__ = __str__
-
-    def swap(self, deint: Type[_Deinterlacer]) -> _Deinterlacer:
-        return deint(**self.params)
+        return super().__vscall__(clip, field, **kwargs)
 
 
 class _EdgeDirectedInterpolation(Deinterlacer, ABC):
@@ -47,7 +40,7 @@ class _AcceptExternalDeintClip(Deinterlacer, ABC):
         return self.__class__(external_deint_clip=other)
 
 
-class _EEDIX(_AcceptExternalDeintClip, ABC):
+class _EEDIX(_EdgeDirectedInterpolation, ABC):
     @inject_param(name='sclip')
     def __call__(self, clip: vs.VideoNode, field: int, **kwargs: Any) -> vs.VideoNode:
         return super().__call__(clip, field, **kwargs)
@@ -55,35 +48,35 @@ class _EEDIX(_AcceptExternalDeintClip, ABC):
 
 class NNEDI3(_EdgeDirectedInterpolation):
     """Neural Network Edge Directed Interpolation 3rd gen"""
-    deinterlacer = lambda: core.nnedi3.nnedi3
+    func = lambda: core.nnedi3.nnedi3
 
 
 class NNEDI3CL(_EdgeDirectedInterpolation):
-    deinterlacer = lambda: core.nnedi3cl.NNEDI3CL
+    func = lambda: core.nnedi3cl.NNEDI3CL
 
 
 class ZNEDI3(_EdgeDirectedInterpolation):
-    deinterlacer = lambda: core.znedi3.nnedi3
+    func = lambda: core.znedi3.nnedi3
 
 
 class EEDI2(_EdgeDirectedInterpolation):
-    deinterlacer = lambda: core.eedi2.EEDI2
+    func = lambda: core.eedi2.EEDI2
 
 
 class EEDI3(_EEDIX):
-    deinterlacer = lambda: core.eedi3.eedi3
+    func = lambda: core.eedi3.eedi3
 
 
 class EEDI3m(_EEDIX):
-    deinterlacer = lambda: core.eedi3m.EEDI3
+    func = lambda: core.eedi3m.EEDI3
 
 
 class EEDI3mCL(_EEDIX):
-    deinterlacer = lambda: core.eedi3m.EEDI3CL
+    func = lambda: core.eedi3m.EEDI3CL
 
 
 class SangNom2(Deinterlacer):
-    deinterlacer = lambda: core.sangnom.SangNom
+    func = lambda: core.sangnom.SangNom
 
     def __call__(self, clip: vs.VideoNode, field: int, **kwargs: Any) -> vs.VideoNode:
         order = [2, 1, 0, 0][field]
@@ -97,7 +90,7 @@ class SangNom2(Deinterlacer):
 
 
 class BWDiF(_AcceptExternalDeintClip):
-    deinterlacer = lambda: core.bwdif.Bwdif
+    func = lambda: core.bwdif.Bwdif
 
     @inject_param(name='deint')
     def __call__(self, clip: vs.VideoNode, field: int, **kwargs: Any) -> vs.VideoNode:
