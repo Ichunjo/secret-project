@@ -1,19 +1,18 @@
 from typing import TYPE_CHECKING, List, Type
 
 import yaml
-from pkg_resources import resource_filename
+# from pkg_resources import resource_filename
 
 from ._abstract import LoggedSettings
-from ._interface import (CoreParam, CoreSettings, DeinterlacerD,
-                         InterpolationSettings, MotionAnalysisSettings,
-                         NoiseSettings, Settings, SharpnessSettings,
-                         SourceMatchSettings)
+from ._interface import (CoreParam, CoreSettings, InterpolationSettings,
+                         MotionAnalysisSettings, NoiseSettings, Settings,
+                         SharpnessSettings, SourceMatchSettings)
 from ._presets import Preset
 
 
 def load_preset(p: Preset) -> Settings:
     try:
-        with open('D:/Documents/secret-project/qtgmc_modern/presets/' + p.name + '.yml', 'r', encoding='utf-8') as f:
+        with open('D:/Documents/secret-project/qtgmc_modern/settings/' + p.name + '.yml', 'r', encoding='utf-8') as f:
         # with open(resource_filename('qtgmc_modern', p.value + '.yml'), 'r', encoding='utf-8') as f:
             config = yaml.load(f, Loader=yaml.CLoader)
     except FileNotFoundError as file_err:
@@ -32,7 +31,8 @@ def load_preset(p: Preset) -> Settings:
             InterpolationSettings,
             MotionAnalysisSettings,
             SharpnessSettings,
-            SourceMatchSettings
+            SourceMatchSettings,
+            NoiseSettings
         ]
         for key, classe in zip(keys, classes):
             config[key] = classe(**config[key])
