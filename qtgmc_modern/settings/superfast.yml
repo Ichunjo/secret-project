@@ -40,6 +40,7 @@ motion_analysis:
   thsad_final_output: 256
   thscd1: 180
   thscd2: 98
+  prog_sad_mask: 0.0
 
 sharpness:
   strength: 1.0

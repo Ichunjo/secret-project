@@ -68,6 +68,7 @@ if TYPE_CHECKING:
         thsad_final_output: int
         thscd1: int
         thscd2: int
+        prog_sad_mask: float
 
 
     class SharpnessSettings(TypedDict):
