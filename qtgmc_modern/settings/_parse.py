@@ -12,7 +12,7 @@ from ._presets import Preset
 
 def load_preset(p: Preset) -> Settings:
     try:
-        with open('D:/Documents/secret-project/qtgmc_modern/settings/' + p.name + '.yml', 'r', encoding='utf-8') as f:
+        with open('D:/Documents/secret-project/qtgmc_modern/settings/yml/' + p.name + '.yml', 'r', encoding='utf-8') as f:
         # with open(resource_filename('qtgmc_modern', p.value + '.yml'), 'r', encoding='utf-8') as f:
             config = yaml.load(f, Loader=yaml.CLoader)
     except FileNotFoundError as file_err:
@@ -24,7 +24,8 @@ def load_preset(p: Preset) -> Settings:
             'interpolation',
             'motion_analysis',
             'sharpness',
-            'source_match'
+            'source_match',
+            'noise'
         ]
         classes: List[Type[LoggedSettings]] = [
             CoreSettings,
