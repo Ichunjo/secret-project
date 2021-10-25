@@ -1,11 +1,9 @@
 import math
 from functools import partial
 
-import mvsfunc as mvf
 import vapoursynth as vs
 
 core = vs.core
-
 
 
 #-------------------------------------------------------------------#
@@ -23,7 +21,8 @@ core = vs.core
 # --- LATEST CHANGES ---
 #
 # v3.33
-# - Increased maximum value for Rep0, Rep1 and Rep2 to 7 (from 5). Higher values help with flicker on static detail, potential for minor motion blur
+# - Increased maximum value for Rep0, Rep1 and Rep2 to 7 (from 5). Higher values help with flicker on static detail,
+#   potential for minor motion blur
 # - Bug fix for the fact that Bob always outputs a BFF clip regardless of field order of input (thanks ajp_anton)
 # - Improved generation of noise (NoiseDeint="Generate") for noise bypass / EZKeepGrain
 # - Minor change to denoising
@@ -41,690 +40,719 @@ core = vs.core
 #   eedi3m - if selected directly or via a source-match preset
 #   FFT3DFilter - if selected for noise processing
 #   DFTTest - if selected for noise processing
-#       For FFT3DFilter & DFTTest you also need the FFTW3 library (FFTW.org). On Windows the file needed for both is libfftw3f-3.dll.
+#       For FFT3DFilter & DFTTest you also need the FFTW3 library (FFTW.org).
+#       On Windows the file needed for both is libfftw3f-3.dll.
 #       Put the file in your System32 or SysWow64 folder
 #   KNLMeansCL - if selected for noise processing
 #   AddGrain - if NoiseDeint="Generate" selected for noise bypass
-#
-# --- GETTING STARTED ---
-#
-# The "Preset" used selects sensible settings for a given encoding speed. Choose a preset from:
-#   "Placebo", "Very Slow", "Slower", "Slow", "Medium", "Fast", "Faster", "Very Fast", "Super Fast", "Ultra Fast" & "Draft"
-# The default preset is "Slower"
-# Don't be obsessed with using slower settings as the differences can be small. HD material benefits little from extreme settings (and will be very slow)
-# For much faster speeds read the full documentation, the section on 'Multi-threading'
-#
-# There are many settings for tweaking the script, full details in the main documentation. You can display settings currently being used with "ShowSettings":
-#   QTGMC( Preset="Slow", ShowSettings=True )
-def QTGMC(Input, Preset='Slower', TR0=None, TR1=None, TR2=None, Rep0=None, Rep1=0, Rep2=None, EdiMode=None, RepChroma=True, NNSize=None, NNeurons=None, EdiQual=1, EdiMaxD=None, ChromaEdi='',
-          EdiExt=None, Sharpness=None, SMode=None, SLMode=None, SLRad=None, SOvs=0, SVThin=0.0, Sbb=None, SrchClipPP=None, SubPel=None, SubPelInterp=2, BlockSize=None, Overlap=None, Search=None,
-          SearchParam=None, PelSearch=None, ChromaMotion=None, TrueMotion=False, Lambda=None, LSAD=None, PNew=None, PLevel=None, GlobalMotion=True, DCT=0, ThSAD1=640, ThSAD2=256, ThSCD1=180, ThSCD2=98,
-          SourceMatch=0, MatchPreset=None, MatchEdi=None, MatchPreset2=None, MatchEdi2=None, MatchTR2=1, MatchEnhance=0.5, Lossless=0, NoiseProcess=None, EZDenoise=None, EZKeepGrain=None,
-          NoisePreset='Fast', Denoiser=None, FftThreads=1, DenoiseMC=None, NoiseTR=None, Sigma=None, ChromaNoise=False, ShowNoise=0.0, GrainRestore=None, NoiseRestore=None, NoiseDeint=None,
-          StabilizeNoise=None, InputType=0, ProgSADMask=None, FPSDivisor=1, ShutterBlur=0, ShutterAngleSrc=180, ShutterAngleOut=180, SBlurLimit=4, Border=False, Precise=None, Tuning='None',
-          ShowSettings=False, ForceTR=0, TFF=None, pscrn=None, int16_prescreener=None, int16_predictor=None, exp=None, alpha=None, beta=None, gamma=None, nrad=None, vcheck=None, opencl=False, device=None):
-    #---------------------------------------
-    # Presets
-    assert Input.format
 
-    # Select presets / tuning
-    Preset = Preset.lower()
-    presets = ['placebo', 'very slow', 'slower', 'slow', 'medium', 'fast', 'faster', 'very fast', 'super fast', 'ultra fast', 'draft']
-    try:
-        pNum = presets.index(Preset)
-    except:
-        raise vs.Error("QTGMC: 'Preset' choice is invalid")
+def QTGMC(
+    # Basic
+    Input, Preset='Slower',
 
-    if MatchPreset is None:
-        mpNum1 = pNum + 3 if pNum + 3 <= 9 else 9
-        MatchPreset = presets[mpNum1]
-    else:
-        try:
-            mpNum1 = presets[:10].index(MatchPreset.lower())
-        except:
-            raise vs.Error("QTGMC: 'MatchPreset' choice is invalid/unsupported")
+    # Core Settings
+    TR0=None, TR1=None, TR2=None, Rep0=None, Rep1=0, Rep2=None, RepChroma=True,
 
-    if MatchPreset2 is None:
-        mpNum2 = mpNum1 + 2 if mpNum1 + 2 <= 9 else 9
-        MatchPreset2 = presets[mpNum2]
-    else:
-        try:
-            mpNum2 = presets[:10].index(MatchPreset2.lower())
-        except:
-            raise vs.Error("QTGMC: 'MatchPreset2' choice is invalid/unsupported")
-
-    try:
-        npNum = presets[2:7].index(NoisePreset.lower())
-    except:
-        raise vs.Error("QTGMC: 'NoisePreset' choice is invalid")
-
-    try:
-        tNum = ['none', 'dv-sd', 'dv-hd'].index(Tuning.lower())
-    except:
-        raise vs.Error("QTGMC: 'Tuning' choice is invalid")
-
-    # Tunings only affect blocksize in this version
-    bs = [16, 16, 32][tNum]
-    bs2 = 32 if bs >= 16 else bs * 2
-
-    #                                                   Very                                                        Very      Super     Ultra
-    # Preset groups:                          Placebo   Slow      Slower    Slow      Medium    Fast      Faster    Fast      Fast      Fast      Draft
-    if TR0          is None: TR0          = [ 2,        2,        2,        2,        2,        2,        1,        1,        1,        1,        0      ][pNum]
-    if TR1          is None: TR1          = [ 2,        2,        2,        1,        1,        1,        1,        1,        1,        1,        1      ][pNum]
-    if TR2 is not None:
-        TR2X = TR2
-    else:
-        TR2X                              = [ 3,        2,        1,        1,        1,        0,        0,        0,        0,        0,        0      ][pNum]
-    if Rep0         is None: Rep0         = [ 4,        4,        4,        4,        3,        3,        0,        0,        0,        0,        0      ][pNum]
-    if Rep2         is None: Rep2         = [ 4,        4,        4,        4,        4,        4,        4,        4,        3,        3,        0      ][pNum]
-    if EdiMode is not None:
-        EdiMode = EdiMode.lower()
-    else:
-        EdiMode                           = ['nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'bob'   ][pNum]
-    if NNSize       is None: NNSize       = [ 1,        1,        1,        1,        5,        5,        4,        4,        4,        4,        4      ][pNum]
-    if NNeurons     is None: NNeurons     = [ 2,        2,        1,        1,        1,        0,        0,        0,        0,        0,        0      ][pNum]
-    if EdiMaxD      is None: EdiMaxD      = [ 12,       10,       8,        7,        7,        6,        6,        5,        4,        4,        4      ][pNum]
-    ChromaEdi = ChromaEdi.lower()
-    if SMode        is None: SMode        = [ 2,        2,        2,        2,        2,        2,        2,        2,        2,        2,        0      ][pNum]
-    if SLMode is not None:
-        SLModeX = SLMode
-    else:
-        SLModeX                           = [ 2,        2,        2,        2,        2,        2,        2,        2,        0,        0,        0      ][pNum]
-    if SLRad        is None: SLRad        = [ 3,        1,        1,        1,        1,        1,        1,        1,        1,        1,        1      ][pNum]
-    if Sbb          is None: Sbb          = [ 3,        1,        1,        0,        0,        0,        0,        0,        0,        0,        0      ][pNum]
-    if SrchClipPP   is None: SrchClipPP   = [ 3,        3,        3,        3,        3,        2,        2,        2,        1,        1,        0      ][pNum]
-    if SubPel       is None: SubPel       = [ 2,        2,        2,        2,        1,        1,        1,        1,        1,        1,        1      ][pNum]
-    if BlockSize    is None: BlockSize    = [ bs,       bs,       bs,       bs,       bs,       bs,       bs2,      bs2,      bs2,      bs2,      bs2    ][pNum]
-    bs = BlockSize
-    if Overlap      is None: Overlap      = [ bs // 2,  bs // 2,  bs // 2,  bs // 2,  bs // 2,  bs // 2,  bs // 2,  bs // 4,  bs // 4,  bs // 4,  bs // 4][pNum]
-    if Search       is None: Search       = [ 5,        4,        4,        4,        4,        4,        4,        4,        0,        0,        0      ][pNum]
-    if SearchParam  is None: SearchParam  = [ 2,        2,        2,        2,        2,        2,        2,        1,        1,        1,        1      ][pNum]
-    if PelSearch    is None: PelSearch    = [ 2,        2,        2,        2,        1,        1,        1,        1,        1,        1,        1      ][pNum]
-    if ChromaMotion is None: ChromaMotion = [ True,     True,     True,     False,    False,    False,    False,    False,    False,    False,    False  ][pNum]
-    if Precise      is None: Precise      = [ True,     True,     False,    False,    False,    False,    False,    False,    False,    False,    False  ][pNum]
-    if ProgSADMask  is None: ProgSADMask  = [ 10.0,     10.0,     10.0,     10.0,     10.0,     0.0,      0.0,      0.0,      0.0,      0.0,      0.0    ][pNum]
-
-    # Noise presets                               Slower      Slow       Medium     Fast      Faster
-    if Denoiser is not None:
-        Denoiser = Denoiser.lower()
-    else:
-        Denoiser                              = ['dfttest',  'dfttest', 'dfttest', 'fft3df', 'fft3df'][npNum]
-    if DenoiseMC      is None: DenoiseMC      = [ True,       True,      False,     False,    False  ][npNum]
-    if NoiseTR        is None: NoiseTR        = [ 2,          1,         1,         1,        0      ][npNum]
-    if NoiseDeint is not None:
-        NoiseDeint = NoiseDeint.lower()
-    else:
-        NoiseDeint                            = ['generate', 'bob',      '',        '',       ''     ][npNum]
-    if StabilizeNoise is None: StabilizeNoise = [ True,       True,      True,      False,    False  ][npNum]
-
-    # The basic source-match step corrects and re-runs the interpolation of the input clip. So it initialy uses same interpolation settings as the main preset
-    MatchNNSize = NNSize
-    MatchNNeurons = NNeurons
-    MatchEdiQual = EdiQual
-    MatchEdiMaxD = EdiMaxD
-
-    # However, can use a faster initial interpolation when using source-match allowing the basic source-match step to "correct" it with higher quality settings
-    if SourceMatch > 0 and mpNum1 < pNum:
-        raise vs.Error("QTGMC: 'MatchPreset' cannot use a slower setting than 'Preset'")
-    # Basic source-match presets
-    if SourceMatch > 0:
-        #                     Very                                            Very   Super   Ultra
-        #           Placebo   Slow   Slower   Slow   Medium   Fast   Faster   Fast   Fast    Fast
-        NNSize   = [1,        1,     1,       1,     5,       5,     4,       4,     4,      4][mpNum1]
-        NNeurons = [2,        2,     1,       1,     1,       0,     0,       0,     0,      0][mpNum1]
-        EdiQual  = [1,        1,     1,       1,     1,       1,     1,       1,     1,      1][mpNum1]
-        EdiMaxD  = [12,       10,    8,       7,     7,       6,     6,       5,     4,      4][mpNum1]
-    TempEdi = EdiMode # Main interpolation is actually done by basic-source match step when enabled, so a little swap and wriggle is needed
-    if SourceMatch > 0 and MatchEdi is not None:
-        EdiMode = MatchEdi.lower()
-    MatchEdi = TempEdi
-
-    #                                             Very                                                        Very      Super    Ultra
-    # Refined source-match presets      Placebo   Slow      Slower    Slow      Medium    Fast      Faster    Fast      Fast     Fast
-    if MatchEdi2 is not None:
-        MatchEdi2 = MatchEdi2.lower()
-    else:
-        MatchEdi2                   = ['nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', ''][mpNum2]
-    MatchNNSize2                    = [ 1,        1,        1,        1,        5,        5,        4,        4,        4,       4 ][mpNum2]
-    MatchNNeurons2                  = [ 2,        2,        1,        1,        1,        0,        0,        0,        0,       0 ][mpNum2]
-    MatchEdiQual2                   = [ 1,        1,        1,        1,        1,        1,        1,        1,        1,       1 ][mpNum2]
-    MatchEdiMaxD2                   = [ 12,       10,       8,        7,        7,        6,        6,        5,        4,       4 ][mpNum2]
-
-    #---------------------------------------
-    # Settings
-
-    if not isinstance(Input, vs.VideoNode):
-        raise vs.Error('QTGMC: This is not a clip')
-
-    if EdiExt is not None and (not isinstance(EdiExt, vs.VideoNode) or EdiExt.format.id != Input.format.id):
-        raise vs.Error("QTGMC: 'EdiExt' must be the same format as input")
-
-    if InputType != 1 and not isinstance(TFF, bool):
-        raise vs.Error("QTGMC: 'TFF' must be set when InputType!=1. Setting TFF to true means top field first and false means bottom field first")
-
-    isGray = (Input.format.color_family == vs.GRAY)
-
-    neutral = 1 << (Input.format.bits_per_sample - 1)
-    peak = (1 << Input.format.bits_per_sample) - 1
-
-    SOvs = scale(SOvs, peak)
-
-    # Core defaults
-    if SourceMatch > 0:
-        if TR2 is None:
-            TR2 = 1 if TR2X <= 0 else TR2X # ***TR2 defaults always at least 1 when using source-match***
-    else:
-        TR2 = TR2X
-
-    # Source-match defaults
-    MatchTR1 = TR1
-
-    # Sharpness defaults. Sharpness default is always 1.0 (0.2 with source-match), but adjusted to give roughly same sharpness for all settings
-    if Sharpness is not None and Sharpness <= 0:
-        SMode = 0
-    if SourceMatch > 0:
-        if SLMode is None:
-            SLMode = 0 # ***Sharpness limiting disabled by default for source-match***
-    else:
-        SLMode = SLModeX
-    if SLRad <= 0:
-        SLMode = 0
-    spatialSL = SLMode in [1, 3]
-    temporalSL = SLMode in [2, 4]
-    if Sharpness is None:
-        Sharpness = 0.0 if SMode <= 0 else 0.2 if SourceMatch > 0 else 1.0 # Default sharpness is 1.0, or 0.2 if using source-match
-    sharpMul = 2 if temporalSL else 1.5 if spatialSL else 1 # Adjust sharpness based on other settings
-    sharpAdj = Sharpness * (sharpMul * (0.2 + TR1 * 0.15 + TR2 * 0.25) + (0.1 if SMode == 1 else 0)) # [This needs a bit more refinement]
-    if SMode <= 0:
-        Sbb = 0
-
-    # Noise processing settings
-    if EZDenoise is not None and EZDenoise > 0 and EZKeepGrain is not None and EZKeepGrain > 0:
-        raise vs.Error("QTGMC: EZDenoise and EZKeepGrain cannot be used together")
-    if NoiseProcess is None:
-        if EZDenoise is not None and EZDenoise > 0:
-            NoiseProcess = 1
-        elif (EZKeepGrain is not None and EZKeepGrain > 0) or Preset in ['placebo', 'very slow']:
-            NoiseProcess = 2
-        else:
-            NoiseProcess = 0
-    if GrainRestore is None:
-        if EZDenoise is not None and EZDenoise > 0:
-            GrainRestore = 0.0
-        elif EZKeepGrain is not None and EZKeepGrain > 0:
-            GrainRestore = 0.3 * math.sqrt(EZKeepGrain)
-        else:
-            GrainRestore = [0.0, 0.7, 0.3][NoiseProcess]
-    if NoiseRestore is None:
-        if EZDenoise is not None and EZDenoise > 0:
-            NoiseRestore = 0.0
-        elif EZKeepGrain is not None and EZKeepGrain > 0:
-            NoiseRestore = 0.1 * math.sqrt(EZKeepGrain)
-        else:
-            NoiseRestore = [0.0, 0.3, 0.1][NoiseProcess]
-    if Sigma is None:
-        if EZDenoise is not None and EZDenoise > 0:
-            Sigma = EZDenoise
-        elif EZKeepGrain is not None and EZKeepGrain > 0:
-            Sigma = 4.0 * EZKeepGrain
-        else:
-            Sigma = 2.0
-    if isinstance(ShowNoise, bool):
-        ShowNoise = 10.0 if ShowNoise else 0.0
-    if ShowNoise > 0:
-        NoiseProcess = 2
-        NoiseRestore = 1.0
-    if NoiseProcess <= 0:
-        NoiseTR = 0
-        GrainRestore = 0.0
-        NoiseRestore = 0.0
-    totalRestore = GrainRestore + NoiseRestore
-    if totalRestore <= 0:
-        StabilizeNoise = False
-    noiseTD = [1, 3, 5][NoiseTR]
-    noiseCentre = 128.5 * 2 ** (Input.format.bits_per_sample - 8) if Denoiser in ['fft3df', 'fft3dfilter'] else neutral
-
-    # MVTools settings
-    if Lambda is None:
-        Lambda = (1000 if TrueMotion else 100) * BlockSize * BlockSize // 64
-    if LSAD is None:
-        LSAD = 1200 if TrueMotion else 400
-    if PNew is None:
-        PNew = 50 if TrueMotion else 25
-    if PLevel is None:
-        PLevel = 1 if TrueMotion else 0
-
-    # Motion blur settings
-    if ShutterAngleOut * FPSDivisor == ShutterAngleSrc:
-        ShutterBlur = 0 # If motion blur output is same as input
-
-    # Miscellaneous
-    if InputType < 2:
-        ProgSADMask = 0.0
-
-    # Get maximum temporal radius needed
-    maxTR = SLRad if temporalSL else 0
-    maxTR = max(maxTR, MatchTR2, TR1, TR2, NoiseTR)
-    if (ProgSADMask > 0 or StabilizeNoise or ShutterBlur > 0) and maxTR < 1:
-        maxTR = 1
-    maxTR = max(maxTR, ForceTR)
-
-    #---------------------------------------
-    # Pre-Processing
-
-    w = Input.width
-    h = Input.height
-    epsilon = 1e-6
-
-    # Reverse "field" dominance for progressive repair mode 3 (only difference from mode 2)
-    if InputType >= 3:
-        TFF = not TFF
-
-    # Pad vertically during processing (to prevent artefacts at top & bottom edges)
-    if Border:
-        h += 8
-        clip = Input.resize.Point(w, h, src_top=-4, src_height=h)
-    else:
-        clip = Input
-
-    hpad = BlockSize
-    vpad = BlockSize
-
-    #---------------------------------------
-    # Motion Analysis
-
-    # Bob the input as a starting point for motion search clip
-    if InputType <= 0:
-        bobbed = Bob(clip, 0, 0.5, TFF)
-    elif InputType == 1:
-        bobbed = clip
-    else:
-        bobbed = clip.std.Convolution(matrix=[1, 2, 1], mode='v')
-
-    CMplanes = [0, 1, 2] if ChromaMotion and not isGray else [0]
-
-    # The bobbed clip will shimmer due to being derived from alternating fields. Temporally smooth over the neighboring frames using a binomial kernel. Binomial
-    # kernels give equal weight to even and odd frames and hence average away the shimmer. The two kernels used are [1 2 1] and [1 4 6 4 1] for radius 1 and 2.
-    # These kernels are approximately Gaussian kernels, which work well as a prefilter before motion analysis (hence the original name for this script)
-    # Create linear weightings of neighbors first                                                     -2    -1    0     1     2
-    if TR0 > 0: ts1 = AverageFrames(bobbed, weights=[1] * 3, scenechange=28 / 255, planes=CMplanes) # 0.00  0.33  0.33  0.33  0.00
-    if TR0 > 1: ts2 = AverageFrames(bobbed, weights=[1] * 5, scenechange=28 / 255, planes=CMplanes) # 0.20  0.20  0.20  0.20  0.20
-
-    # Combine linear weightings to give binomial weightings - TR0=0: (1), TR0=1: (1:2:1), TR0=2: (1:4:6:4:1)
-    if TR0 <= 0:
-        binomial0 = bobbed
-    elif TR0 == 1:
-        binomial0 = core.std.Merge(ts1, bobbed, weight=[0.25] if ChromaMotion or isGray else [0.25, 0])
-    else:
-        binomial0 = core.std.Merge(core.std.Merge(ts1, ts2, weight=[0.357] if ChromaMotion or isGray else [0.357, 0]), bobbed, weight=[0.125] if ChromaMotion or isGray else [0.125, 0])
-
-    # Remove areas of difference between temporal blurred motion search clip and bob that are not due to bob-shimmer - removes general motion blur
-    if Rep0 <= 0:
-        repair0 = binomial0
-    else:
-        repair0 = QTGMC_KeepOnlyBobShimmerFixes(binomial0, bobbed, Rep0, RepChroma and ChromaMotion)
-
-    # Blur image and soften edges to assist in motion matching of edge blocks. Blocks are matched by SAD (sum of absolute differences between blocks), but even
-    # a slight change in an edge from frame to frame will give a high SAD due to the higher contrast of edges
-    if SrchClipPP == 1:
-        spatialBlur = repair0.resize.Bilinear(w // 2, h // 2).std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1], planes=CMplanes).resize.Bilinear(w, h)
-    elif SrchClipPP >= 2:
-        spatialBlur = Resize(repair0.std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1], planes=CMplanes), w, h, sw=w + epsilon, sh=h + epsilon, kernel='gauss', a1=2, dmode=1)
-    if SrchClipPP > 1:
-        spatialBlur = core.std.Merge(spatialBlur, repair0, weight=[0.1] if ChromaMotion or isGray else [0.1, 0])
-    if SrchClipPP <= 0:
-        srchClip = repair0
-    elif SrchClipPP < 3:
-        srchClip = spatialBlur
-    else:
-        expr = 'x {i} + y < x {i} + x {i} - y > x {i} - y ? ?'.format(i=scale(3, peak))
-        tweaked = core.std.Expr([repair0, bobbed], expr=[expr] if ChromaMotion or isGray else [expr, ''])
-        expr = 'x {i} + y < x {j} + x {i} - y > x {j} - x 51 * y 49 * + 100 / ? ?'.format(i=scale(7, peak), j=scale(2, peak))
-        srchClip = core.std.Expr([spatialBlur, tweaked], expr=[expr] if ChromaMotion or isGray else [expr, ''])
-
-    # Calculate forward and backward motion vectors from motion search clip
-    if maxTR > 0:
-        analyse_args = dict(blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, pelsearch=PelSearch, truemotion=TrueMotion, lambda_=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel,
-                            global_=GlobalMotion, dct=DCT, chroma=ChromaMotion)
-        srchSuper = DitherLumaRebuild(srchClip, s0=1, chroma=ChromaMotion).mv.Super(pel=SubPel, sharp=SubPelInterp, hpad=hpad, vpad=vpad, chroma=ChromaMotion)
-        bVec1 = srchSuper.mv.Analyse(isb=True, delta=1, **analyse_args)
-        fVec1 = srchSuper.mv.Analyse(isb=False, delta=1, **analyse_args)
-    if maxTR > 1:
-        bVec2 = srchSuper.mv.Analyse(isb=True, delta=2, **analyse_args)
-        fVec2 = srchSuper.mv.Analyse(isb=False, delta=2, **analyse_args)
-    if maxTR > 2:
-        bVec3 = srchSuper.mv.Analyse(isb=True, delta=3, **analyse_args)
-        fVec3 = srchSuper.mv.Analyse(isb=False, delta=3, **analyse_args)
-
-    #---------------------------------------
-    # Noise Processing
-
-    # Expand fields to full frame size before extracting noise (allows use of motion vectors which are frame-sized)
-    if NoiseProcess > 0:
-        if InputType > 0:
-            fullClip = clip
-        else:
-            fullClip = Bob(clip, 0, 1, TFF)
-    if NoiseTR > 0:
-        fullSuper = fullClip.mv.Super(pel=SubPel, levels=1, hpad=hpad, vpad=vpad, chroma=ChromaNoise) #TEST chroma OK?
-
-    CNplanes = [0, 1, 2] if ChromaNoise and not isGray else [0]
-
-    # Create a motion compensated temporal window around current frame and use to guide denoisers
-    if NoiseProcess > 0:
-        if not DenoiseMC or NoiseTR <= 0:
-            noiseWindow = fullClip
-        elif NoiseTR == 1:
-            noiseWindow = core.std.Interleave([core.mv.Compensate(fullClip, fullSuper, fVec1, thscd1=ThSCD1, thscd2=ThSCD2),
-                                               fullClip,
-                                               core.mv.Compensate(fullClip, fullSuper, bVec1, thscd1=ThSCD1, thscd2=ThSCD2)])
-        else:
-            noiseWindow = core.std.Interleave([core.mv.Compensate(fullClip, fullSuper, fVec2, thscd1=ThSCD1, thscd2=ThSCD2),
-                                               core.mv.Compensate(fullClip, fullSuper, fVec1, thscd1=ThSCD1, thscd2=ThSCD2),
-                                               fullClip,
-                                               core.mv.Compensate(fullClip, fullSuper, bVec1, thscd1=ThSCD1, thscd2=ThSCD2),
-                                               core.mv.Compensate(fullClip, fullSuper, bVec2, thscd1=ThSCD1, thscd2=ThSCD2)])
-        if Denoiser == 'dfttest':
-            dnWindow = noiseWindow.dfttest.DFTTest(sigma=Sigma * 4, tbsize=noiseTD, planes=CNplanes)
-        elif Denoiser == 'knlmeanscl':
-            if ChromaNoise and not isGray:
-                dnWindow = KNLMeansCL(noiseWindow, d=NoiseTR, h=Sigma)
-            else:
-                dnWindow = noiseWindow.knlm.KNLMeansCL(d=NoiseTR, h=Sigma)
-        else:
-            dnWindow = noiseWindow.fft3dfilter.FFT3DFilter(sigma=Sigma, planes=CNplanes, bt=noiseTD, ncpu=FftThreads)
-
-        # Rework denoised clip to match source format - various code paths here: discard the motion compensation window, discard doubled lines (from point resize)
-        # Also reweave to get interlaced noise if source was interlaced (could keep the full frame of noise, but it will be poor quality from the point resize)
-        if not DenoiseMC:
-            if InputType > 0:
-                denoised = dnWindow
-            else:
-                denoised = Weave(dnWindow.std.SeparateFields(tff=TFF).std.SelectEvery(cycle=4, offsets=[0, 3]), tff=TFF)
-        elif InputType > 0:
-            if NoiseTR <= 0:
-                denoised = dnWindow
-            else:
-                denoised = dnWindow.std.SelectEvery(cycle=noiseTD, offsets=[NoiseTR])
-        else:
-            denoised = Weave(dnWindow.std.SeparateFields(tff=TFF).std.SelectEvery(cycle=noiseTD * 4, offsets=[NoiseTR * 2, NoiseTR * 6 + 3]), tff=TFF)
-
-    # Get actual noise from difference. Then 'deinterlace' where we have weaved noise - create the missing lines of noise in various ways
-    if NoiseProcess > 0 and totalRestore > 0:
-        noise = core.std.MakeDiff(clip, denoised, planes=CNplanes)
-        if InputType > 0:
-            deintNoise = noise
-        elif NoiseDeint == 'bob':
-            deintNoise = Bob(noise, 0, 0.5, TFF)
-        elif NoiseDeint == 'generate':
-            deintNoise = QTGMC_Generate2ndFieldNoise(noise, denoised, ChromaNoise, TFF)
-        else:
-            deintNoise = noise.std.SeparateFields(tff=TFF).std.DoubleWeave(tff=TFF)
-
-        # Motion-compensated stabilization of generated noise
-        if StabilizeNoise:
-            noiseSuper = deintNoise.mv.Super(pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad, chroma=ChromaNoise)
-            mcNoise = core.mv.Compensate(deintNoise, noiseSuper, bVec1, thscd1=ThSCD1, thscd2=ThSCD2)
-            expr = f'x {neutral} - abs y {neutral} - abs > x y ? 0.6 * x y + 0.2 * +'
-            finalNoise = core.std.Expr([deintNoise, mcNoise], expr=[expr] if ChromaNoise or isGray else [expr, ''])
-        else:
-            finalNoise = deintNoise
-
-    # If NoiseProcess=1 denoise input clip. If NoiseProcess=2 leave noise in the clip and let the temporal blurs "denoise" it for a stronger effect
-    innerClip = denoised if NoiseProcess == 1 else clip
-
-    #---------------------------------------
     # Interpolation
+    EdiMode=None, NNSize=None, NNeurons=None, EdiQual=1, EdiMaxD=None, ChromaEdi='',
+    EdiExt=None,
 
-    # Support badly deinterlaced progressive content - drop half the fields and reweave to get 1/2fps interlaced stream appropriate for QTGMC processing
-    if InputType > 1:
-        ediInput = Weave(innerClip.std.SeparateFields(tff=TFF).std.SelectEvery(cycle=4, offsets=[0, 3]), tff=TFF)
-    else:
-        ediInput = innerClip
+    # Sharpness
+    Sharpness=None, SMode=None, SLMode=None, SLRad=None, SOvs=0, SVThin=0.0, Sbb=None,
 
-    # Create interpolated image as starting point for output
-    if EdiExt is not None:
-        edi1 = EdiExt.resize.Point(w, h, src_top=(EdiExt.height - h) // 2, src_height=h)
-    else:
-        edi1 = QTGMC_Interpolate(ediInput, InputType, EdiMode, NNSize, NNeurons, EdiQual, EdiMaxD, pscrn, int16_prescreener, int16_predictor, exp, alpha, beta, gamma, nrad, vcheck,
-                                 bobbed, ChromaEdi, TFF, opencl, device)
+    # Motion Analysis
+    SrchClipPP=None, SubPel=None, SubPelInterp=2, BlockSize=None, Overlap=None, Search=None,
+    SearchParam=None, PelSearch=None, ChromaMotion=None, TrueMotion=False, Lambda=None, LSAD=None, PNew=None, PLevel=None,
+    GlobalMotion=True,
+    DCT=0, ThSAD1=640, ThSAD2=256, ThSCD1=180, ThSCD2=98,
 
-    # InputType=2,3: use motion mask to blend luma between original clip & reweaved clip based on ProgSADMask setting. Use chroma from original clip in any case
-    if InputType < 2:
-        edi = edi1
-    elif ProgSADMask <= 0:
-        if not isGray:
-            edi = core.std.ShufflePlanes([edi1, innerClip], planes=[0, 1, 2], colorfamily=Input.format.color_family)
+    # Source Match / Lossless
+    SourceMatch=0, MatchPreset=None, MatchEdi=None, MatchPreset2=None, MatchEdi2=None, MatchTR2=1, MatchEnhance=0.5, Lossless=0,
+
+    # Noise Bypass / Denoising
+    NoiseProcess=None, EZDenoise=None, EZKeepGrain=None, NoisePreset='Fast', Denoiser=None, FftThreads=1, DenoiseMC=None,
+    NoiseTR=None, Sigma=None, ChromaNoise=False,
+    ShowNoise=0.0,
+    GrainRestore=None, NoiseRestore=None, NoiseDeint=None,
+    StabilizeNoise=None,
+
+    # Progressive Input
+    InputType=0, ProgSADMask=None,
+
+    # Shutter Speed Motion Blur / Frame Rate
+    FPSDivisor=1,
+    ShutterBlur=0, ShutterAngleSrc=180, ShutterAngleOut=180, SBlurLimit=4, Border=False, Precise=None,
+
+    # Miscellaneous Settings
+    Tuning='None',
+
+    ShowSettings=False,
+
+    ForceTR=0,
+
+    TFF=None,
+
+    # NNEDI and EEDI random settings
+    pscrn=None, int16_prescreener=None, int16_predictor=None, exp=None, alpha=None, beta=None, gamma=None, nrad=None, vcheck=None,
+    opencl=False, device=None
+):
+    if True:   # annoying stuff, presets values blablabla
+        #---------------------------------------
+        # Presets
+        assert Input.format
+
+        # Select presets / tuning
+        Preset = Preset.lower()
+        presets = ['placebo', 'very slow', 'slower', 'slow', 'medium', 'fast', 'faster', 'very fast', 'super fast', 'ultra fast', 'draft']
+        pNum = presets.index(Preset)
+
+        if MatchPreset is None:
+            mpNum1 = pNum + 3 if pNum + 3 <= 9 else 9
+            MatchPreset = presets[mpNum1]
         else:
+            try:
+                mpNum1 = presets[:10].index(MatchPreset.lower())
+            except ValueError:
+                raise vs.Error("QTGMC: 'MatchPreset' choice is invalid/unsupported")
+
+        if MatchPreset2 is None:
+            mpNum2 = mpNum1 + 2 if mpNum1 + 2 <= 9 else 9
+            MatchPreset2 = presets[mpNum2]
+        else:
+            try:
+                mpNum2 = presets[:10].index(MatchPreset2.lower())
+            except ValueError:
+                raise vs.Error("QTGMC: 'MatchPreset2' choice is invalid/unsupported")
+
+        try:
+            npNum = presets[2:7].index(NoisePreset.lower())
+        except ValueError:
+            raise vs.Error("QTGMC: 'NoisePreset' choice is invalid")
+
+        try:
+            tNum = ['none', 'dv-sd', 'dv-hd'].index(Tuning.lower())
+        except ValueError:
+            raise vs.Error("QTGMC: 'Tuning' choice is invalid")
+
+        # Tunings only affect blocksize in this version
+        bs = [16, 16, 32][tNum]
+        bs2 = 32 if bs >= 16 else bs * 2
+
+        #                                                   Very                                                        Very      Super     Ultra
+        # Preset groups:                          Placebo   Slow      Slower    Slow      Medium    Fast      Faster    Fast      Fast      Fast      Draft
+        if TR0          is None: TR0          = [ 2,        2,        2,        2,        2,        2,        1,        1,        1,        1,        0      ][pNum]
+        if TR1          is None: TR1          = [ 2,        2,        2,        1,        1,        1,        1,        1,        1,        1,        1      ][pNum]
+        if TR2 is not None:
+            TR2X = TR2
+        else:
+            TR2X                              = [ 3,        2,        1,        1,        1,        0,        0,        0,        0,        0,        0      ][pNum]
+        if Rep0         is None: Rep0         = [ 4,        4,        4,        4,        3,        3,        0,        0,        0,        0,        0      ][pNum]
+        if Rep2         is None: Rep2         = [ 4,        4,        4,        4,        4,        4,        4,        4,        3,        3,        0      ][pNum]
+        if EdiMode is not None:
+            EdiMode = EdiMode.lower()
+        else:
+            EdiMode                           = ['nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'bob'   ][pNum]
+        if NNSize       is None: NNSize       = [ 1,        1,        1,        1,        5,        5,        4,        4,        4,        4,        4      ][pNum]
+        if NNeurons     is None: NNeurons     = [ 2,        2,        1,        1,        1,        0,        0,        0,        0,        0,        0      ][pNum]
+        if EdiMaxD      is None: EdiMaxD      = [ 12,       10,       8,        7,        7,        6,        6,        5,        4,        4,        4      ][pNum]
+        ChromaEdi = ChromaEdi.lower()
+        if SMode        is None: SMode        = [ 2,        2,        2,        2,        2,        2,        2,        2,        2,        2,        0      ][pNum]
+        if SLMode is not None:
+            SLModeX = SLMode
+        else:
+            SLModeX                           = [ 2,        2,        2,        2,        2,        2,        2,        2,        0,        0,        0      ][pNum]
+        if SLRad        is None: SLRad        = [ 3,        1,        1,        1,        1,        1,        1,        1,        1,        1,        1      ][pNum]
+        if Sbb          is None: Sbb          = [ 3,        1,        1,        0,        0,        0,        0,        0,        0,        0,        0      ][pNum]
+        if SrchClipPP   is None: SrchClipPP   = [ 3,        3,        3,        3,        3,        2,        2,        2,        1,        1,        0      ][pNum]
+        if SubPel       is None: SubPel       = [ 2,        2,        2,        2,        1,        1,        1,        1,        1,        1,        1      ][pNum]
+        if BlockSize    is None: BlockSize    = [ bs,       bs,       bs,       bs,       bs,       bs,       bs2,      bs2,      bs2,      bs2,      bs2    ][pNum]
+        bs = BlockSize
+        if Overlap      is None: Overlap      = [ bs // 2,  bs // 2,  bs // 2,  bs // 2,  bs // 2,  bs // 2,  bs // 2,  bs // 4,  bs // 4,  bs // 4,  bs // 4][pNum]
+        if Search       is None: Search       = [ 5,        4,        4,        4,        4,        4,        4,        4,        0,        0,        0      ][pNum]
+        if SearchParam  is None: SearchParam  = [ 2,        2,        2,        2,        2,        2,        2,        1,        1,        1,        1      ][pNum]
+        if PelSearch    is None: PelSearch    = [ 2,        2,        2,        2,        1,        1,        1,        1,        1,        1,        1      ][pNum]
+        if ChromaMotion is None: ChromaMotion = [ True,     True,     True,     False,    False,    False,    False,    False,    False,    False,    False  ][pNum]
+        if Precise      is None: Precise      = [ True,     True,     False,    False,    False,    False,    False,    False,    False,    False,    False  ][pNum]
+        if ProgSADMask  is None: ProgSADMask  = [ 10.0,     10.0,     10.0,     10.0,     10.0,     0.0,      0.0,      0.0,      0.0,      0.0,      0.0    ][pNum]
+
+        # Noise presets                               Slower      Slow       Medium     Fast      Faster
+        if Denoiser is not None:
+            Denoiser = Denoiser.lower()
+        else:
+            Denoiser                              = ['dfttest',  'dfttest', 'dfttest', 'fft3df', 'fft3df'][npNum]
+        if DenoiseMC      is None: DenoiseMC      = [ True,       True,      False,     False,    False  ][npNum]
+        if NoiseTR        is None: NoiseTR        = [ 2,          1,         1,         1,        0      ][npNum]
+        if NoiseDeint is not None:
+            NoiseDeint = NoiseDeint.lower()
+        else:
+            NoiseDeint                            = ['generate', 'bob',      '',        '',       ''     ][npNum]
+        if StabilizeNoise is None: StabilizeNoise = [ True,       True,      True,      False,    False  ][npNum]
+
+        # The basic source-match step corrects and re-runs the interpolation of the input clip. So it initialy uses same interpolation settings as the main preset
+        MatchNNSize = NNSize
+        MatchNNeurons = NNeurons
+        MatchEdiQual = EdiQual
+        MatchEdiMaxD = EdiMaxD
+
+        # However, can use a faster initial interpolation when using source-match allowing the basic source-match step to "correct" it with higher quality settings
+        if SourceMatch > 0 and mpNum1 < pNum:
+            raise vs.Error("QTGMC: 'MatchPreset' cannot use a slower setting than 'Preset'")
+        # Basic source-match presets
+        if SourceMatch > 0:
+            #                     Very                                            Very   Super   Ultra
+            #           Placebo   Slow   Slower   Slow   Medium   Fast   Faster   Fast   Fast    Fast
+            NNSize   = [1,        1,     1,       1,     5,       5,     4,       4,     4,      4][mpNum1]
+            NNeurons = [2,        2,     1,       1,     1,       0,     0,       0,     0,      0][mpNum1]
+            EdiQual  = [1,        1,     1,       1,     1,       1,     1,       1,     1,      1][mpNum1]
+            EdiMaxD  = [12,       10,    8,       7,     7,       6,     6,       5,     4,      4][mpNum1]
+        TempEdi = EdiMode # Main interpolation is actually done by basic-source match step when enabled, so a little swap and wriggle is needed
+        if SourceMatch > 0 and MatchEdi is not None:
+            EdiMode = MatchEdi.lower()
+        MatchEdi = TempEdi
+
+        #                                             Very                                                        Very      Super    Ultra
+        # Refined source-match presets      Placebo   Slow      Slower    Slow      Medium    Fast      Faster    Fast      Fast     Fast
+        if MatchEdi2 is not None:
+            MatchEdi2 = MatchEdi2.lower()
+        else:
+            MatchEdi2                   = ['nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', 'nnedi3', ''][mpNum2]
+        MatchNNSize2                    = [ 1,        1,        1,        1,        5,        5,        4,        4,        4,       4 ][mpNum2]
+        MatchNNeurons2                  = [ 2,        2,        1,        1,        1,        0,        0,        0,        0,       0 ][mpNum2]
+        MatchEdiQual2                   = [ 1,        1,        1,        1,        1,        1,        1,        1,        1,       1 ][mpNum2]
+        MatchEdiMaxD2                   = [ 12,       10,       8,        7,        7,        6,        6,        5,        4,       4 ][mpNum2]
+
+    if True:  # Default Settings
+        #---------------------------------------
+        # Settings
+        isGray = (Input.format.color_family == vs.GRAY)
+        neutral = 1 << (Input.format.bits_per_sample - 1)
+        peak = (1 << Input.format.bits_per_sample) - 1
+
+        SOvs = scale(SOvs, peak)
+
+        # Core defaults
+        if SourceMatch > 0:
+            if TR2 is None:
+                TR2 = 1 if TR2X <= 0 else TR2X # ***TR2 defaults always at least 1 when using source-match***
+        else:
+            TR2 = TR2X
+
+        # Source-match defaults
+        MatchTR1 = TR1
+
+        # Sharpness defaults. Sharpness default is always 1.0 (0.2 with source-match), but adjusted to give roughly same sharpness for all settings
+        if Sharpness is not None and Sharpness <= 0:
+            SMode = 0
+        if SourceMatch > 0:
+            if SLMode is None:
+                SLMode = 0 # ***Sharpness limiting disabled by default for source-match***
+        else:
+            SLMode = SLModeX
+        if SLRad <= 0:
+            SLMode = 0
+        spatialSL = SLMode in [1, 3]
+        temporalSL = SLMode in [2, 4]
+        if Sharpness is None:
+            Sharpness = 0.0 if SMode <= 0 else 0.2 if SourceMatch > 0 else 1.0 # Default sharpness is 1.0, or 0.2 if using source-match
+        sharpMul = 2 if temporalSL else 1.5 if spatialSL else 1 # Adjust sharpness based on other settings
+        sharpAdj = Sharpness * (sharpMul * (0.2 + TR1 * 0.15 + TR2 * 0.25) + (0.1 if SMode == 1 else 0)) # [This needs a bit more refinement]
+        if SMode <= 0:
+            Sbb = 0
+
+        # Noise processing settings
+        if EZDenoise is not None and EZDenoise > 0 and EZKeepGrain is not None and EZKeepGrain > 0:
+            raise vs.Error("QTGMC: EZDenoise and EZKeepGrain cannot be used together")
+        if NoiseProcess is None:
+            if EZDenoise is not None and EZDenoise > 0:
+                NoiseProcess = 1
+            elif (EZKeepGrain is not None and EZKeepGrain > 0) or Preset in ['placebo', 'very slow']:
+                NoiseProcess = 2
+            else:
+                NoiseProcess = 0
+        if GrainRestore is None:
+            if EZDenoise is not None and EZDenoise > 0:
+                GrainRestore = 0.0
+            elif EZKeepGrain is not None and EZKeepGrain > 0:
+                GrainRestore = 0.3 * math.sqrt(EZKeepGrain)
+            else:
+                GrainRestore = [0.0, 0.7, 0.3][NoiseProcess]
+        if NoiseRestore is None:
+            if EZDenoise is not None and EZDenoise > 0:
+                NoiseRestore = 0.0
+            elif EZKeepGrain is not None and EZKeepGrain > 0:
+                NoiseRestore = 0.1 * math.sqrt(EZKeepGrain)
+            else:
+                NoiseRestore = [0.0, 0.3, 0.1][NoiseProcess]
+        if Sigma is None:
+            if EZDenoise is not None and EZDenoise > 0:
+                Sigma = EZDenoise
+            elif EZKeepGrain is not None and EZKeepGrain > 0:
+                Sigma = 4.0 * EZKeepGrain
+            else:
+                Sigma = 2.0
+        if isinstance(ShowNoise, bool):
+            ShowNoise = 10.0 if ShowNoise else 0.0
+        if ShowNoise > 0:
+            NoiseProcess = 2
+            NoiseRestore = 1.0
+        if NoiseProcess <= 0:
+            NoiseTR = 0
+            GrainRestore = 0.0
+            NoiseRestore = 0.0
+        totalRestore = GrainRestore + NoiseRestore
+        if totalRestore <= 0:
+            StabilizeNoise = False
+        noiseTD = [1, 3, 5][NoiseTR]
+        noiseCentre = 128.5 * 2 ** (Input.format.bits_per_sample - 8) if Denoiser in ['fft3df', 'fft3dfilter'] else neutral
+
+        # MVTools settings
+        if Lambda is None:
+            Lambda = (1000 if TrueMotion else 100) * BlockSize * BlockSize // 64
+        if LSAD is None:
+            LSAD = 1200 if TrueMotion else 400
+        if PNew is None:
+            PNew = 50 if TrueMotion else 25
+        if PLevel is None:
+            PLevel = 1 if TrueMotion else 0
+
+        # Motion blur settings
+        if ShutterAngleOut * FPSDivisor == ShutterAngleSrc:
+            ShutterBlur = 0 # If motion blur output is same as input
+
+        # Miscellaneous
+        if InputType < 2:
+            ProgSADMask = 0.0
+
+        # Get maximum temporal radius needed
+        maxTR = SLRad if temporalSL else 0
+        maxTR = max(maxTR, MatchTR2, TR1, TR2, NoiseTR)
+        if (ProgSADMask > 0 or StabilizeNoise or ShutterBlur > 0) and maxTR < 1:
+            maxTR = 1
+        maxTR = max(maxTR, ForceTR)
+
+    if True:  # Pre-Processing
+        #---------------------------------------
+        # Pre-Processing
+
+        w = Input.width
+        h = Input.height
+        epsilon = 1e-6
+
+        # Reverse "field" dominance for progressive repair mode 3 (only difference from mode 2)
+        if InputType >= 3:
+            TFF = not TFF
+
+        # Pad vertically during processing (to prevent artefacts at top & bottom edges)
+        if Border:
+            h += 8
+            clip = Input.resize.Point(w, h, src_top=-4, src_height=h)
+        else:
+            clip = Input
+
+        hpad = BlockSize
+        vpad = BlockSize
+
+    if True:  # Seems to be the actual processing starting with Motion Analysis
+        #---------------------------------------
+        # Motion Analysis
+
+        # Bob the input as a starting point for motion search clip
+        if InputType <= 0:
+            bobbed = Bob(clip, 0, 0.5, TFF)
+        elif InputType == 1:
+            bobbed = clip
+        else:
+            bobbed = clip.std.Convolution(matrix=[1, 2, 1], mode='v')
+
+        CMplanes = [0, 1, 2] if ChromaMotion and not isGray else [0]
+
+        # The bobbed clip will shimmer due to being derived from alternating fields. Temporally smooth over the neighboring frames using a binomial kernel. Binomial
+        # kernels give equal weight to even and odd frames and hence average away the shimmer. The two kernels used are [1 2 1] and [1 4 6 4 1] for radius 1 and 2.
+        # These kernels are approximately Gaussian kernels, which work well as a prefilter before motion analysis (hence the original name for this script)
+        # Create linear weightings of neighbors first                                                     -2    -1    0     1     2
+        if TR0 > 0: ts1 = AverageFrames(bobbed, weights=[1] * 3, scenechange=28 / 255, planes=CMplanes) # 0.00  0.33  0.33  0.33  0.00
+        if TR0 > 1: ts2 = AverageFrames(bobbed, weights=[1] * 5, scenechange=28 / 255, planes=CMplanes) # 0.20  0.20  0.20  0.20  0.20
+
+        # Combine linear weightings to give binomial weightings - TR0=0: (1), TR0=1: (1:2:1), TR0=2: (1:4:6:4:1)
+        if TR0 <= 0:
+            binomial0 = bobbed
+        elif TR0 == 1:
+            binomial0 = core.std.Merge(ts1, bobbed, weight=[0.25] if ChromaMotion or isGray else [0.25, 0])
+        else:
+            binomial0 = core.std.Merge(core.std.Merge(ts1, ts2, weight=[0.357] if ChromaMotion or isGray else [0.357, 0]), bobbed, weight=[0.125] if ChromaMotion or isGray else [0.125, 0])
+
+        # Remove areas of difference between temporal blurred motion search clip and bob that are not due to bob-shimmer - removes general motion blur
+        if Rep0 <= 0:
+            repair0 = binomial0
+        else:
+            repair0 = QTGMC_KeepOnlyBobShimmerFixes(binomial0, bobbed, Rep0, RepChroma and ChromaMotion)
+
+        # Blur image and soften edges to assist in motion matching of edge blocks. Blocks are matched by SAD (sum of absolute differences between blocks), but even
+        # a slight change in an edge from frame to frame will give a high SAD due to the higher contrast of edges
+        if SrchClipPP == 1:
+            spatialBlur = repair0.resize.Bilinear(w // 2, h // 2).std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1], planes=CMplanes).resize.Bilinear(w, h)
+        elif SrchClipPP >= 2:
+            spatialBlur = Resize(repair0.std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1], planes=CMplanes), w, h, sw=w + epsilon, sh=h + epsilon, kernel='gauss', a1=2, dmode=1)
+        if SrchClipPP > 1:
+            spatialBlur = core.std.Merge(spatialBlur, repair0, weight=[0.1] if ChromaMotion or isGray else [0.1, 0])
+        if SrchClipPP <= 0:
+            srchClip = repair0
+        elif SrchClipPP < 3:
+            srchClip = spatialBlur
+        else:
+            expr = 'x {i} + y < x {i} + x {i} - y > x {i} - y ? ?'.format(i=scale(3, peak))
+            tweaked = core.std.Expr([repair0, bobbed], expr=[expr] if ChromaMotion or isGray else [expr, ''])
+            expr = 'x {i} + y < x {j} + x {i} - y > x {j} - x 51 * y 49 * + 100 / ? ?'.format(i=scale(7, peak), j=scale(2, peak))
+            srchClip = core.std.Expr([spatialBlur, tweaked], expr=[expr] if ChromaMotion or isGray else [expr, ''])
+
+        # Calculate forward and backward motion vectors from motion search clip
+        if maxTR > 0:
+            analyse_args = dict(blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, pelsearch=PelSearch, truemotion=TrueMotion, lambda_=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel,
+                                global_=GlobalMotion, dct=DCT, chroma=ChromaMotion)
+            srchSuper = DitherLumaRebuild(srchClip, s0=1, chroma=ChromaMotion).mv.Super(pel=SubPel, sharp=SubPelInterp, hpad=hpad, vpad=vpad, chroma=ChromaMotion)
+            bVec1 = srchSuper.mv.Analyse(isb=True, delta=1, **analyse_args)
+            fVec1 = srchSuper.mv.Analyse(isb=False, delta=1, **analyse_args)
+        if maxTR > 1:
+            bVec2 = srchSuper.mv.Analyse(isb=True, delta=2, **analyse_args)
+            fVec2 = srchSuper.mv.Analyse(isb=False, delta=2, **analyse_args)
+        if maxTR > 2:
+            bVec3 = srchSuper.mv.Analyse(isb=True, delta=3, **analyse_args)
+            fVec3 = srchSuper.mv.Analyse(isb=False, delta=3, **analyse_args)
+
+    if True:  # Noise Processing
+        #---------------------------------------
+        # Noise Processing
+
+        # Expand fields to full frame size before extracting noise (allows use of motion vectors which are frame-sized)
+        if NoiseProcess > 0:
+            if InputType > 0:
+                fullClip = clip
+            else:
+                fullClip = Bob(clip, 0, 1, TFF)
+        if NoiseTR > 0:
+            fullSuper = fullClip.mv.Super(pel=SubPel, levels=1, hpad=hpad, vpad=vpad, chroma=ChromaNoise) #TEST chroma OK?
+
+        CNplanes = [0, 1, 2] if ChromaNoise and not isGray else [0]
+
+        # Create a motion compensated temporal window around current frame and use to guide denoisers
+        if NoiseProcess > 0:
+            if not DenoiseMC or NoiseTR <= 0:
+                noiseWindow = fullClip
+            elif NoiseTR == 1:
+                noiseWindow = core.std.Interleave([core.mv.Compensate(fullClip, fullSuper, fVec1, thscd1=ThSCD1, thscd2=ThSCD2),
+                                                fullClip,
+                                                core.mv.Compensate(fullClip, fullSuper, bVec1, thscd1=ThSCD1, thscd2=ThSCD2)])
+            else:
+                noiseWindow = core.std.Interleave([core.mv.Compensate(fullClip, fullSuper, fVec2, thscd1=ThSCD1, thscd2=ThSCD2),
+                                                core.mv.Compensate(fullClip, fullSuper, fVec1, thscd1=ThSCD1, thscd2=ThSCD2),
+                                                fullClip,
+                                                core.mv.Compensate(fullClip, fullSuper, bVec1, thscd1=ThSCD1, thscd2=ThSCD2),
+                                                core.mv.Compensate(fullClip, fullSuper, bVec2, thscd1=ThSCD1, thscd2=ThSCD2)])
+            if Denoiser == 'dfttest':
+                dnWindow = noiseWindow.dfttest.DFTTest(sigma=Sigma * 4, tbsize=noiseTD, planes=CNplanes)
+            elif Denoiser == 'knlmeanscl':
+                if ChromaNoise and not isGray:
+                    dnWindow = KNLMeansCL(noiseWindow, d=NoiseTR, h=Sigma)
+                else:
+                    dnWindow = noiseWindow.knlm.KNLMeansCL(d=NoiseTR, h=Sigma)
+            else:
+                dnWindow = noiseWindow.fft3dfilter.FFT3DFilter(sigma=Sigma, planes=CNplanes, bt=noiseTD, ncpu=FftThreads)
+
+            # Rework denoised clip to match source format - various code paths here: discard the motion compensation window, discard doubled lines (from point resize)
+            # Also reweave to get interlaced noise if source was interlaced (could keep the full frame of noise, but it will be poor quality from the point resize)
+            if not DenoiseMC:
+                if InputType > 0:
+                    denoised = dnWindow
+                else:
+                    denoised = Weave(dnWindow.std.SeparateFields(tff=TFF).std.SelectEvery(cycle=4, offsets=[0, 3]), tff=TFF)
+            elif InputType > 0:
+                if NoiseTR <= 0:
+                    denoised = dnWindow
+                else:
+                    denoised = dnWindow.std.SelectEvery(cycle=noiseTD, offsets=[NoiseTR])
+            else:
+                denoised = Weave(dnWindow.std.SeparateFields(tff=TFF).std.SelectEvery(cycle=noiseTD * 4, offsets=[NoiseTR * 2, NoiseTR * 6 + 3]), tff=TFF)
+
+        # Get actual noise from difference. Then 'deinterlace' where we have weaved noise - create the missing lines of noise in various ways
+        if NoiseProcess > 0 and totalRestore > 0:
+            noise = core.std.MakeDiff(clip, denoised, planes=CNplanes)
+            if InputType > 0:
+                deintNoise = noise
+            elif NoiseDeint == 'bob':
+                deintNoise = Bob(noise, 0, 0.5, TFF)
+            elif NoiseDeint == 'generate':
+                deintNoise = QTGMC_Generate2ndFieldNoise(noise, denoised, ChromaNoise, TFF)
+            else:
+                deintNoise = noise.std.SeparateFields(tff=TFF).std.DoubleWeave(tff=TFF)
+
+            # Motion-compensated stabilization of generated noise
+            if StabilizeNoise:
+                noiseSuper = deintNoise.mv.Super(pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad, chroma=ChromaNoise)
+                mcNoise = core.mv.Compensate(deintNoise, noiseSuper, bVec1, thscd1=ThSCD1, thscd2=ThSCD2)
+                expr = f'x {neutral} - abs y {neutral} - abs > x y ? 0.6 * x y + 0.2 * +'
+                finalNoise = core.std.Expr([deintNoise, mcNoise], expr=[expr] if ChromaNoise or isGray else [expr, ''])
+            else:
+                finalNoise = deintNoise
+
+        # If NoiseProcess=1 denoise input clip. If NoiseProcess=2 leave noise in the clip and let the temporal blurs "denoise" it for a stronger effect
+        innerClip = denoised if NoiseProcess == 1 else clip
+
+    if True:  # Interpolation
+        #---------------------------------------
+        # Interpolation
+
+        # Support badly deinterlaced progressive content - drop half the fields and reweave to get 1/2fps interlaced stream appropriate for QTGMC processing
+        if InputType > 1:
+            ediInput = Weave(innerClip.std.SeparateFields(tff=TFF).std.SelectEvery(cycle=4, offsets=[0, 3]), tff=TFF)
+        else:
+            ediInput = innerClip
+
+        # Create interpolated image as starting point for output
+        if EdiExt is not None:
+            edi1 = EdiExt.resize.Point(w, h, src_top=(EdiExt.height - h) // 2, src_height=h)
+        else:
+            edi1 = QTGMC_Interpolate(ediInput, InputType, EdiMode, NNSize, NNeurons, EdiQual, EdiMaxD, pscrn, int16_prescreener, int16_predictor, exp, alpha, beta, gamma, nrad, vcheck,
+                                    bobbed, ChromaEdi, TFF, opencl, device)
+
+        # InputType=2,3: use motion mask to blend luma between original clip & reweaved clip based on ProgSADMask setting. Use chroma from original clip in any case
+        if InputType < 2:
             edi = edi1
-    else:
-        inputTypeBlend = core.mv.Mask(srchClip, bVec1, kind=1, ml=ProgSADMask)
-        edi = core.std.MaskedMerge(innerClip, edi1, inputTypeBlend, planes=[0])
-
-    # Get the max/min value for each pixel over neighboring motion-compensated frames - used for temporal sharpness limiting
-    if TR1 > 0 or temporalSL:
-        ediSuper = edi.mv.Super(pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad)
-    if temporalSL:
-        bComp1 = core.mv.Compensate(edi, ediSuper, bVec1, thscd1=ThSCD1, thscd2=ThSCD2)
-        fComp1 = core.mv.Compensate(edi, ediSuper, fVec1, thscd1=ThSCD1, thscd2=ThSCD2)
-        tMax = core.std.Expr([core.std.Expr([edi, fComp1], expr=['x y max']), bComp1], expr=['x y max'])
-        tMin = core.std.Expr([core.std.Expr([edi, fComp1], expr=['x y min']), bComp1], expr=['x y min'])
-        if SLRad > 1:
-            bComp3 = core.mv.Compensate(edi, ediSuper, bVec3, thscd1=ThSCD1, thscd2=ThSCD2)
-            fComp3 = core.mv.Compensate(edi, ediSuper, fVec3, thscd1=ThSCD1, thscd2=ThSCD2)
-            tMax = core.std.Expr([core.std.Expr([tMax, fComp3], expr=['x y max']), bComp3], expr=['x y max'])
-            tMin = core.std.Expr([core.std.Expr([tMin, fComp3], expr=['x y min']), bComp3], expr=['x y min'])
-
-    #---------------------------------------
-    # Create basic output
-
-    # Use motion vectors to blur interpolated image (edi) with motion-compensated previous and next frames. As above, this is done to remove shimmer from
-    # alternate frames so the same binomial kernels are used. However, by using motion-compensated smoothing this time we avoid motion blur. The use of
-    # MDegrain1 (motion compensated) rather than TemporalSmooth makes the weightings *look* different, but they evaluate to the same values
-    # Create linear weightings of neighbors first                                                                      -2    -1    0     1     2
-    if TR1 > 0: degrain1 = core.mv.Degrain1(edi, ediSuper, bVec1, fVec1, thsad=ThSAD1, thscd1=ThSCD1, thscd2=ThSCD2) # 0.00  0.33  0.33  0.33  0.00
-    if TR1 > 1: degrain2 = core.mv.Degrain1(edi, ediSuper, bVec2, fVec2, thsad=ThSAD1, thscd1=ThSCD1, thscd2=ThSCD2) # 0.33  0.00  0.33  0.00  0.33
-
-    # Combine linear weightings to give binomial weightings - TR1=0: (1), TR1=1: (1:2:1), TR1=2: (1:4:6:4:1)
-    if TR1 <= 0:
-        binomial1 = edi
-    elif TR1 == 1:
-        binomial1 = core.std.Merge(degrain1, edi, weight=[0.25])
-    else:
-        binomial1 = core.std.Merge(core.std.Merge(degrain1, degrain2, weight=[0.2]), edi, weight=[0.0625])
-
-    # Remove areas of difference between smoothed image and interpolated image that are not bob-shimmer fixes: repairs residual motion blur from temporal smooth
-    if Rep1 <= 0:
-        repair1 = binomial1
-    else:
-        repair1 = QTGMC_KeepOnlyBobShimmerFixes(binomial1, edi, Rep1, RepChroma)
-
-    # Apply source match - use difference between output and source to succesively refine output [extracted to function to clarify main code path]
-    if SourceMatch <= 0:
-        match = repair1
-    else:
-        match = QTGMC_ApplySourceMatch(repair1, InputType, ediInput, bVec1 if maxTR > 0 else None, fVec1 if maxTR > 0 else None, bVec2 if maxTR > 1 else None, fVec2 if maxTR > 1 else None, SubPel,
-                                       SubPelInterp, hpad, vpad, ThSAD1, ThSCD1, ThSCD2, SourceMatch, MatchTR1, MatchEdi, MatchNNSize, MatchNNeurons, MatchEdiQual, MatchEdiMaxD, MatchTR2, MatchEdi2,
-                                       MatchNNSize2, MatchNNeurons2, MatchEdiQual2, MatchEdiMaxD2, MatchEnhance, pscrn, int16_prescreener, int16_predictor, exp, alpha, beta, gamma, nrad, vcheck,
-                                       TFF, opencl, device)
-    # Lossless=2 - after preparing an interpolated, de-shimmered clip, restore the original source fields into it and clean up any artefacts
-    # This mode will not give a true lossless result because the resharpening and final temporal smooth are still to come, but it will add further detail
-    # However, it can introduce minor combing. This setting is best used together with source-match (it's effectively the final source-match stage)
-    if Lossless >= 2:
-        lossed1 = QTGMC_MakeLossless(match, innerClip, InputType, TFF)
-    else:
-        lossed1 = match
-
-    #---------------------------------------
-    # Resharpen / retouch output
-
-    # Resharpen to counteract temporal blurs. Little sharpening needed for source-match mode since it has already recovered sharpness from source
-    if SMode <= 0:
-        resharp = lossed1
-    elif SMode == 1:
-        resharp = core.std.Expr([lossed1, lossed1.std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1])], expr=[f'x x y - {sharpAdj} * +'])
-    else:
-        vresharp1 = core.std.Merge(lossed1.std.Maximum(coordinates=[0, 1, 0, 0, 0, 0, 1, 0]), lossed1.std.Minimum(coordinates=[0, 1, 0, 0, 0, 0, 1, 0]))
-        if Precise:
-            vresharp = core.std.Expr([vresharp1, lossed1], expr=['x y < x {i} + x y > x {i} - x ? ?'.format(i=scale(1, peak))]) # Precise mode: reduce tiny overshoot
+        elif ProgSADMask <= 0:
+            if not isGray:
+                edi = core.std.ShufflePlanes([edi1, innerClip], planes=[0, 1, 2], colorfamily=Input.format.color_family)
+            else:
+                edi = edi1
         else:
-            vresharp = vresharp1
-        resharp = core.std.Expr([lossed1, vresharp.std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1])], expr=[f'x x y - {sharpAdj} * +'])
+            inputTypeBlend = core.mv.Mask(srchClip, bVec1, kind=1, ml=ProgSADMask)
+            edi = core.std.MaskedMerge(innerClip, edi1, inputTypeBlend, planes=[0])
 
-    # Slightly thin down 1-pixel high horizontal edges that have been widened into neigboring field lines by the interpolator
-    SVThinSc = SVThin * 6.0
-    if SVThin > 0:
-        expr = f'y x - {SVThinSc} * {neutral} +'
-        vertMedD = core.std.Expr([lossed1, lossed1.rgvs.VerticalCleaner(mode=[1] if isGray else [1, 0])], expr=[expr] if isGray else [expr, ''])
-        vertMedD = vertMedD.std.Convolution(matrix=[1, 2, 1], planes=[0], mode='h')
-        expr = f'y {neutral} - abs x {neutral} - abs > y {neutral} ?'
-        neighborD = core.std.Expr([vertMedD, vertMedD.std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1], planes=[0])], expr=[expr] if isGray else [expr, ''])
-        thin = core.std.MergeDiff(resharp, neighborD, planes=[0])
-    else:
-        thin = resharp
+        # Get the max/min value for each pixel over neighboring motion-compensated frames - used for temporal sharpness limiting
+        if TR1 > 0 or temporalSL:
+            ediSuper = edi.mv.Super(pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad)
+        if temporalSL:
+            bComp1 = core.mv.Compensate(edi, ediSuper, bVec1, thscd1=ThSCD1, thscd2=ThSCD2)
+            fComp1 = core.mv.Compensate(edi, ediSuper, fVec1, thscd1=ThSCD1, thscd2=ThSCD2)
+            tMax = core.std.Expr([core.std.Expr([edi, fComp1], expr=['x y max']), bComp1], expr=['x y max'])
+            tMin = core.std.Expr([core.std.Expr([edi, fComp1], expr=['x y min']), bComp1], expr=['x y min'])
+            if SLRad > 1:
+                bComp3 = core.mv.Compensate(edi, ediSuper, bVec3, thscd1=ThSCD1, thscd2=ThSCD2)
+                fComp3 = core.mv.Compensate(edi, ediSuper, fVec3, thscd1=ThSCD1, thscd2=ThSCD2)
+                tMax = core.std.Expr([core.std.Expr([tMax, fComp3], expr=['x y max']), bComp3], expr=['x y max'])
+                tMin = core.std.Expr([core.std.Expr([tMin, fComp3], expr=['x y min']), bComp3], expr=['x y min'])
 
-    # Back blend the blurred difference between sharpened & unsharpened clip, before (1st) sharpness limiting (Sbb == 1,3). A small fidelity improvement
-    if Sbb not in [1, 3]:
-        backBlend1 = thin
-    else:
-        backBlend1 = core.std.MakeDiff(thin,
-                                       Resize(core.std.MakeDiff(thin, lossed1, planes=[0]).std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1], planes=[0]),
-                                              w, h, sw=w + epsilon, sh=h + epsilon, kernel='gauss', a1=5, dmode=1),
-                                       planes=[0])
+    if True:  # Create basic output
+        #---------------------------------------
+        # Create basic output
 
-    # Limit over-sharpening by clamping to neighboring (spatial or temporal) min/max values in original
-    # Occurs here (before final temporal smooth) if SLMode == 1,2. This location will restrict sharpness more, but any artefacts introduced will be smoothed
-    if SLMode == 1:
-        if SLRad <= 1:
-            sharpLimit1 = core.rgvs.Repair(backBlend1, edi, mode=[1])
+        # Use motion vectors to blur interpolated image (edi) with motion-compensated previous and next frames. As above, this is done to remove shimmer from
+        # alternate frames so the same binomial kernels are used. However, by using motion-compensated smoothing this time we avoid motion blur. The use of
+        # MDegrain1 (motion compensated) rather than TemporalSmooth makes the weightings *look* different, but they evaluate to the same values
+        # Create linear weightings of neighbors first                                                                      -2    -1    0     1     2
+        if TR1 > 0: degrain1 = core.mv.Degrain1(edi, ediSuper, bVec1, fVec1, thsad=ThSAD1, thscd1=ThSCD1, thscd2=ThSCD2) # 0.00  0.33  0.33  0.33  0.00
+        if TR1 > 1: degrain2 = core.mv.Degrain1(edi, ediSuper, bVec2, fVec2, thsad=ThSAD1, thscd1=ThSCD1, thscd2=ThSCD2) # 0.33  0.00  0.33  0.00  0.33
+
+        # Combine linear weightings to give binomial weightings - TR1=0: (1), TR1=1: (1:2:1), TR1=2: (1:4:6:4:1)
+        if TR1 <= 0:
+            binomial1 = edi
+        elif TR1 == 1:
+            binomial1 = core.std.Merge(degrain1, edi, weight=[0.25])
         else:
-            sharpLimit1 = core.rgvs.Repair(backBlend1, core.rgvs.Repair(backBlend1, edi, mode=[12]), mode=[1])
-    elif SLMode == 2:
-        sharpLimit1 = Clamp(backBlend1, tMax, tMin, SOvs, SOvs)
-    else:
-        sharpLimit1 = backBlend1
+            binomial1 = core.std.Merge(core.std.Merge(degrain1, degrain2, weight=[0.2]), edi, weight=[0.0625])
 
-    # Back blend the blurred difference between sharpened & unsharpened clip, after (1st) sharpness limiting (Sbb == 2,3). A small fidelity improvement
-    if Sbb < 2:
-        backBlend2 = sharpLimit1
-    else:
-        backBlend2 = core.std.MakeDiff(sharpLimit1,
-                                       Resize(core.std.MakeDiff(sharpLimit1, lossed1, planes=[0]).std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1], planes=[0]),
-                                              w, h, sw=w + epsilon, sh=h + epsilon, kernel='gauss', a1=5, dmode=1),
-                                       planes=[0])
-
-    # Add back any extracted noise, prior to final temporal smooth - this will restore detail that was removed as "noise" without restoring the noise itself
-    # Average luma of FFT3DFilter extracted noise is 128.5, so deal with that too
-    if GrainRestore <= 0:
-        addNoise1 = backBlend2
-    else:
-        expr = f'x {noiseCentre} - {GrainRestore} * {neutral} +'
-        addNoise1 = core.std.MergeDiff(backBlend2, finalNoise.std.Expr(expr=[expr] if ChromaNoise or isGray else [expr, '']), planes=CNplanes)
-
-    # Final light linear temporal smooth for denoising
-    if TR2 > 0:
-        stableSuper = addNoise1.mv.Super(pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad)
-    if TR2 <= 0:
-        stable = addNoise1
-    elif TR2 == 1:
-        stable = core.mv.Degrain1(addNoise1, stableSuper, bVec1, fVec1, thsad=ThSAD2, thscd1=ThSCD1, thscd2=ThSCD2)
-    elif TR2 == 2:
-        stable = core.mv.Degrain2(addNoise1, stableSuper, bVec1, fVec1, bVec2, fVec2, thsad=ThSAD2, thscd1=ThSCD1, thscd2=ThSCD2)
-    else:
-        stable = core.mv.Degrain3(addNoise1, stableSuper, bVec1, fVec1, bVec2, fVec2, bVec3, fVec3, thsad=ThSAD2, thscd1=ThSCD1, thscd2=ThSCD2)
-
-    # Remove areas of difference between final output & basic interpolated image that are not bob-shimmer fixes: repairs motion blur caused by temporal smooth
-    if Rep2 <= 0:
-        repair2 = stable
-    else:
-        repair2 = QTGMC_KeepOnlyBobShimmerFixes(stable, edi, Rep2, RepChroma)
-
-    # Limit over-sharpening by clamping to neighboring (spatial or temporal) min/max values in original
-    # Occurs here (after final temporal smooth) if SLMode == 3,4. Allows more sharpening here, but more prone to introducing minor artefacts
-    if SLMode == 3:
-        if SLRad <= 1:
-            sharpLimit2 = core.rgvs.Repair(repair2, edi, mode=[1])
+        # Remove areas of difference between smoothed image and interpolated image that are not bob-shimmer fixes: repairs residual motion blur from temporal smooth
+        if Rep1 <= 0:
+            repair1 = binomial1
         else:
-            sharpLimit2 = core.rgvs.Repair(repair2, core.rgvs.Repair(repair2, edi, mode=[12]), mode=[1])
-    elif SLMode >= 4:
-        sharpLimit2 = Clamp(repair2, tMax, tMin, SOvs, SOvs)
-    else:
-        sharpLimit2 = repair2
+            repair1 = QTGMC_KeepOnlyBobShimmerFixes(binomial1, edi, Rep1, RepChroma)
 
-    # Lossless=1 - inject source fields into result and clean up inevitable artefacts. Provided NoiseRestore=0.0 or 1.0, this mode will make the script result
-    # properly lossless, but this will retain source artefacts and cause some combing (where the smoothed deinterlace doesn't quite match the source)
-    if Lossless == 1:
-        lossed2 = QTGMC_MakeLossless(sharpLimit2, innerClip, InputType, TFF)
-    else:
-        lossed2 = sharpLimit2
+        # Apply source match - use difference between output and source to succesively refine output [extracted to function to clarify main code path]
+        if SourceMatch <= 0:
+            match = repair1
+        else:
+            match = QTGMC_ApplySourceMatch(repair1, InputType, ediInput, bVec1 if maxTR > 0 else None, fVec1 if maxTR > 0 else None, bVec2 if maxTR > 1 else None, fVec2 if maxTR > 1 else None, SubPel,
+                                        SubPelInterp, hpad, vpad, ThSAD1, ThSCD1, ThSCD2, SourceMatch, MatchTR1, MatchEdi, MatchNNSize, MatchNNeurons, MatchEdiQual, MatchEdiMaxD, MatchTR2, MatchEdi2,
+                                        MatchNNSize2, MatchNNeurons2, MatchEdiQual2, MatchEdiMaxD2, MatchEnhance, pscrn, int16_prescreener, int16_predictor, exp, alpha, beta, gamma, nrad, vcheck,
+                                        TFF, opencl, device)
+        # Lossless=2 - after preparing an interpolated, de-shimmered clip, restore the original source fields into it and clean up any artefacts
+        # This mode will not give a true lossless result because the resharpening and final temporal smooth are still to come, but it will add further detail
+        # However, it can introduce minor combing. This setting is best used together with source-match (it's effectively the final source-match stage)
+        if Lossless >= 2:
+            lossed1 = QTGMC_MakeLossless(match, innerClip, InputType, TFF)
+        else:
+            lossed1 = match
 
-    # Add back any extracted noise, after final temporal smooth. This will appear as noise/grain in the output
-    # Average luma of FFT3DFilter extracted noise is 128.5, so deal with that too
-    if NoiseRestore <= 0:
-        addNoise2 = lossed2
-    else:
-        expr = f'x {noiseCentre} - {NoiseRestore} * {neutral} +'
-        addNoise2 = core.std.MergeDiff(lossed2, finalNoise.std.Expr(expr=[expr] if ChromaNoise or isGray else [expr, '']), planes=CNplanes)
+    if True:  # Resharpen / retouch output / Restore the noise too? and denoising?
+        #---------------------------------------
+        # Resharpen / retouch output
 
-    #---------------------------------------
-    # Post-Processing
+        # Resharpen to counteract temporal blurs. Little sharpening needed for source-match mode since it has already recovered sharpness from source
+        if SMode <= 0:
+            resharp = lossed1
+        elif SMode == 1:
+            resharp = core.std.Expr([lossed1, lossed1.std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1])], expr=[f'x x y - {sharpAdj} * +'])
+        else:
+            vresharp1 = core.std.Merge(lossed1.std.Maximum(coordinates=[0, 1, 0, 0, 0, 0, 1, 0]), lossed1.std.Minimum(coordinates=[0, 1, 0, 0, 0, 0, 1, 0]))
+            if Precise:
+                vresharp = core.std.Expr([vresharp1, lossed1], expr=['x y < x {i} + x y > x {i} - x ? ?'.format(i=scale(1, peak))]) # Precise mode: reduce tiny overshoot
+            else:
+                vresharp = vresharp1
+            resharp = core.std.Expr([lossed1, vresharp.std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1])], expr=[f'x x y - {sharpAdj} * +'])
 
-    # Shutter motion blur - get level of blur depending on output framerate and blur already in source
-    blurLevel = (ShutterAngleOut * FPSDivisor - ShutterAngleSrc) * 100 / 360
-    if blurLevel < 0:
-        raise vs.Error('QTGMC: Cannot reduce motion blur already in source: increase ShutterAngleOut or FPSDivisor')
-    if blurLevel > 200:
-        raise vs.Error('QTGMC: Exceeded maximum motion blur level: decrease ShutterAngleOut or FPSDivisor')
+        # Slightly thin down 1-pixel high horizontal edges that have been widened into neigboring field lines by the interpolator
+        SVThinSc = SVThin * 6.0
+        if SVThin > 0:
+            expr = f'y x - {SVThinSc} * {neutral} +'
+            vertMedD = core.std.Expr([lossed1, lossed1.rgvs.VerticalCleaner(mode=[1] if isGray else [1, 0])], expr=[expr] if isGray else [expr, ''])
+            vertMedD = vertMedD.std.Convolution(matrix=[1, 2, 1], planes=[0], mode='h')
+            expr = f'y {neutral} - abs x {neutral} - abs > y {neutral} ?'
+            neighborD = core.std.Expr([vertMedD, vertMedD.std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1], planes=[0])], expr=[expr] if isGray else [expr, ''])
+            thin = core.std.MergeDiff(resharp, neighborD, planes=[0])
+        else:
+            thin = resharp
 
-    # ShutterBlur mode 2,3 - get finer resolution motion vectors to reduce blur "bleeding" into static areas
-    rBlockDivide = [1, 1, 2, 4][ShutterBlur]
-    rBlockSize = BlockSize // rBlockDivide
-    rOverlap = Overlap // rBlockDivide
-    rBlockSize = max(rBlockSize, 4)
-    rOverlap = max(rOverlap, 2)
-    rBlockDivide = BlockSize // rBlockSize
-    rLambda = Lambda // (rBlockDivide * rBlockDivide)
-    if ShutterBlur > 1:
-        recalculate_args = dict(thsad=ThSAD1, blksize=rBlockSize, overlap=rOverlap, search=Search, searchparam=SearchParam, truemotion=TrueMotion, lambda_=rLambda, pnew=PNew, dct=DCT,
-                                chroma=ChromaMotion)
-        sbBVec1 = core.mv.Recalculate(srchSuper, bVec1, **recalculate_args)
-        sbFVec1 = core.mv.Recalculate(srchSuper, fVec1, **recalculate_args)
-    elif ShutterBlur > 0:
-        sbBVec1 = bVec1
-        sbFVec1 = fVec1
+        # Back blend the blurred difference between sharpened & unsharpened clip, before (1st) sharpness limiting (Sbb == 1,3). A small fidelity improvement
+        if Sbb not in [1, 3]:
+            backBlend1 = thin
+        else:
+            backBlend1 = core.std.MakeDiff(thin,
+                                        Resize(core.std.MakeDiff(thin, lossed1, planes=[0]).std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1], planes=[0]),
+                                                w, h, sw=w + epsilon, sh=h + epsilon, kernel='gauss', a1=5, dmode=1),
+                                        planes=[0])
 
-    # Shutter motion blur - use MFlowBlur to blur along motion vectors
-    if ShutterBlur > 0:
-        sblurSuper = addNoise2.mv.Super(pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad)
-        sblur = core.mv.FlowBlur(addNoise2, sblurSuper, sbBVec1, sbFVec1, blur=blurLevel, thscd1=ThSCD1, thscd2=ThSCD2)
+        # Limit over-sharpening by clamping to neighboring (spatial or temporal) min/max values in original
+        # Occurs here (before final temporal smooth) if SLMode == 1,2. This location will restrict sharpness more, but any artefacts introduced will be smoothed
+        if SLMode == 1:
+            if SLRad <= 1:
+                sharpLimit1 = core.rgvs.Repair(backBlend1, edi, mode=[1])
+            else:
+                sharpLimit1 = core.rgvs.Repair(backBlend1, core.rgvs.Repair(backBlend1, edi, mode=[12]), mode=[1])
+        elif SLMode == 2:
+            sharpLimit1 = Clamp(backBlend1, tMax, tMin, SOvs, SOvs)
+        else:
+            sharpLimit1 = backBlend1
 
-    # Shutter motion blur - use motion mask to reduce blurring in areas of low motion - also helps reduce blur "bleeding" into static areas, then select blur type
-    if ShutterBlur <= 0:
-        sblurred = addNoise2
-    elif SBlurLimit <= 0:
-        sblurred = sblur
-    else:
-        sbMotionMask = core.mv.Mask(srchClip, bVec1, kind=0, ml=SBlurLimit)
-        sblurred = core.std.MaskedMerge(addNoise2, sblur, sbMotionMask)
+        # Back blend the blurred difference between sharpened & unsharpened clip, after (1st) sharpness limiting (Sbb == 2,3). A small fidelity improvement
+        if Sbb < 2:
+            backBlend2 = sharpLimit1
+        else:
+            backBlend2 = core.std.MakeDiff(sharpLimit1,
+                                        Resize(core.std.MakeDiff(sharpLimit1, lossed1, planes=[0]).std.Convolution(matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1], planes=[0]),
+                                                w, h, sw=w + epsilon, sh=h + epsilon, kernel='gauss', a1=5, dmode=1),
+                                        planes=[0])
 
-    # Reduce frame rate
-    if FPSDivisor > 1:
-        decimated = sblurred.std.SelectEvery(cycle=FPSDivisor, offsets=[0])
-    else:
-        decimated = sblurred
+        # Add back any extracted noise, prior to final temporal smooth - this will restore detail that was removed as "noise" without restoring the noise itself
+        # Average luma of FFT3DFilter extracted noise is 128.5, so deal with that too
+        if GrainRestore <= 0:
+            addNoise1 = backBlend2
+        else:
+            expr = f'x {noiseCentre} - {GrainRestore} * {neutral} +'
+            addNoise1 = core.std.MergeDiff(backBlend2, finalNoise.std.Expr(expr=[expr] if ChromaNoise or isGray else [expr, '']), planes=CNplanes)
 
-    # Crop off temporary vertical padding
-    if Border:
-        cropped = decimated.std.Crop(top=4, bottom=4)
-    else:
-        cropped = decimated
+        # Final light linear temporal smooth for denoising
+        if TR2 > 0:
+            stableSuper = addNoise1.mv.Super(pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad)
+        if TR2 <= 0:
+            stable = addNoise1
+        elif TR2 == 1:
+            stable = core.mv.Degrain1(addNoise1, stableSuper, bVec1, fVec1, thsad=ThSAD2, thscd1=ThSCD1, thscd2=ThSCD2)
+        elif TR2 == 2:
+            stable = core.mv.Degrain2(addNoise1, stableSuper, bVec1, fVec1, bVec2, fVec2, thsad=ThSAD2, thscd1=ThSCD1, thscd2=ThSCD2)
+        else:
+            stable = core.mv.Degrain3(addNoise1, stableSuper, bVec1, fVec1, bVec2, fVec2, bVec3, fVec3, thsad=ThSAD2, thscd1=ThSCD1, thscd2=ThSCD2)
 
-    # Show output of choice + settings
-    if ShowNoise <= 0:
-        output = cropped
-    else:
-        expr = f'x {neutral} - {ShowNoise} * {neutral} +'
-        output = finalNoise.std.Expr(expr=[expr] if ChromaNoise or isGray else [expr, repr(neutral)])
+        # Remove areas of difference between final output & basic interpolated image that are not bob-shimmer fixes: repairs motion blur caused by temporal smooth
+        if Rep2 <= 0:
+            repair2 = stable
+        else:
+            repair2 = QTGMC_KeepOnlyBobShimmerFixes(stable, edi, Rep2, RepChroma)
+
+        # Limit over-sharpening by clamping to neighboring (spatial or temporal) min/max values in original
+        # Occurs here (after final temporal smooth) if SLMode == 3,4. Allows more sharpening here, but more prone to introducing minor artefacts
+        if SLMode == 3:
+            if SLRad <= 1:
+                sharpLimit2 = core.rgvs.Repair(repair2, edi, mode=[1])
+            else:
+                sharpLimit2 = core.rgvs.Repair(repair2, core.rgvs.Repair(repair2, edi, mode=[12]), mode=[1])
+        elif SLMode >= 4:
+            sharpLimit2 = Clamp(repair2, tMax, tMin, SOvs, SOvs)
+        else:
+            sharpLimit2 = repair2
+
+        # Lossless=1 - inject source fields into result and clean up inevitable artefacts. Provided NoiseRestore=0.0 or 1.0, this mode will make the script result
+        # properly lossless, but this will retain source artefacts and cause some combing (where the smoothed deinterlace doesn't quite match the source)
+        if Lossless == 1:
+            lossed2 = QTGMC_MakeLossless(sharpLimit2, innerClip, InputType, TFF)
+        else:
+            lossed2 = sharpLimit2
+
+        # Add back any extracted noise, after final temporal smooth. This will appear as noise/grain in the output
+        # Average luma of FFT3DFilter extracted noise is 128.5, so deal with that too
+        if NoiseRestore <= 0:
+            addNoise2 = lossed2
+        else:
+            expr = f'x {noiseCentre} - {NoiseRestore} * {neutral} +'
+            addNoise2 = core.std.MergeDiff(lossed2, finalNoise.std.Expr(expr=[expr] if ChromaNoise or isGray else [expr, '']), planes=CNplanes)
+
+    if True:  # Post-Processing with Shutter motion blur / ShutterBlur / framerate
+        #---------------------------------------
+        # Post-Processing
+
+        # Shutter motion blur - get level of blur depending on output framerate and blur already in source
+        blurLevel = (ShutterAngleOut * FPSDivisor - ShutterAngleSrc) * 100 / 360
+        if blurLevel < 0:
+            raise vs.Error('QTGMC: Cannot reduce motion blur already in source: increase ShutterAngleOut or FPSDivisor')
+        if blurLevel > 200:
+            raise vs.Error('QTGMC: Exceeded maximum motion blur level: decrease ShutterAngleOut or FPSDivisor')
+
+        # ShutterBlur mode 2,3 - get finer resolution motion vectors to reduce blur "bleeding" into static areas
+        rBlockDivide = [1, 1, 2, 4][ShutterBlur]
+        rBlockSize = BlockSize // rBlockDivide
+        rOverlap = Overlap // rBlockDivide
+        rBlockSize = max(rBlockSize, 4)
+        rOverlap = max(rOverlap, 2)
+        rBlockDivide = BlockSize // rBlockSize
+        rLambda = Lambda // (rBlockDivide * rBlockDivide)
+        if ShutterBlur > 1:
+            recalculate_args = dict(thsad=ThSAD1, blksize=rBlockSize, overlap=rOverlap, search=Search, searchparam=SearchParam, truemotion=TrueMotion, lambda_=rLambda, pnew=PNew, dct=DCT,
+                                    chroma=ChromaMotion)
+            sbBVec1 = core.mv.Recalculate(srchSuper, bVec1, **recalculate_args)
+            sbFVec1 = core.mv.Recalculate(srchSuper, fVec1, **recalculate_args)
+        elif ShutterBlur > 0:
+            sbBVec1 = bVec1
+            sbFVec1 = fVec1
+
+        # Shutter motion blur - use MFlowBlur to blur along motion vectors
+        if ShutterBlur > 0:
+            sblurSuper = addNoise2.mv.Super(pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad)
+            sblur = core.mv.FlowBlur(addNoise2, sblurSuper, sbBVec1, sbFVec1, blur=blurLevel, thscd1=ThSCD1, thscd2=ThSCD2)
+
+        # Shutter motion blur - use motion mask to reduce blurring in areas of low motion - also helps reduce blur "bleeding" into static areas, then select blur type
+        if ShutterBlur <= 0:
+            sblurred = addNoise2
+        elif SBlurLimit <= 0:
+            sblurred = sblur
+        else:
+            sbMotionMask = core.mv.Mask(srchClip, bVec1, kind=0, ml=SBlurLimit)
+            sblurred = core.std.MaskedMerge(addNoise2, sblur, sbMotionMask)
+
+        # Reduce frame rate
+        if FPSDivisor > 1:
+            decimated = sblurred.std.SelectEvery(cycle=FPSDivisor, offsets=[0])
+        else:
+            decimated = sblurred
+
+        # Crop off temporary vertical padding
+        if Border:
+            cropped = decimated.std.Crop(top=4, bottom=4)
+        else:
+            cropped = decimated
+
+        # Show output of choice + settings
+        if ShowNoise <= 0:
+            output = cropped
+        else:
+            expr = f'x {neutral} - {ShowNoise} * {neutral} +'
+            output = finalNoise.std.Expr(expr=[expr] if ChromaNoise or isGray else [expr, repr(neutral)])
     output = output.std.SetFieldBased(value=0)
     if not ShowSettings:
         return output
@@ -1028,11 +1056,6 @@ def m4(x):
 
 def scale(value, peak):
     return cround(value * peak / 255) if peak != 1 else value / 255
-
-# sin(pi x / 2) for -1 < x < 1 using Taylor series
-def sine_expr(var):
-    return f'{-3.5988432352121e-6} {var} * {var} * {0.00016044118478736} + {var} * {var} * {-0.0046817541353187} + {var} * {var} * {0.079692626246167} + {var} * {var} * {-0.64596409750625} + {var} * {var} * {1.5707963267949} + {var} *'
-
 
 
 def Bob(clip, b=1/3, c=1/3, tff=None):
