@@ -137,7 +137,14 @@ class QTGMC:
                 ma[v.name] = v.truemotion if ma['truemotion'] else v.not_truemotion
 
     def set_sharpness(self, **kwargs: Any) -> None:
-        self._settings['sharpness'].update(kwargs)  # type: ignore
+        sharp = self._settings['sharpness']
+        sharp.update(kwargs)  # type: ignore
+        if sharp['lrad'] <= 0:
+            sharp['lrad'] = 0
+            sharp['lmode'] = 0
+        if sharp['mode'] <= 0:
+            sharp['strength'] = 0.0
+        # if self._settings['source_match']['match'] > 0:
 
     def set_source_match(
         self,
@@ -154,6 +161,7 @@ class QTGMC:
             sm['match'] = match
             if match > 0:
                 if self._settings['core']['final_output']['tr'] <= 0:
+                    # TR2 defaults always at least 1 when using source-match
                     self._settings['core']['final_output']['tr'] = 1
         if lossless is not None:
             sm['lossless'] = lossless
