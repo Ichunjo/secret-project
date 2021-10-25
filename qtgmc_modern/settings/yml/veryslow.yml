@@ -54,13 +54,11 @@ sharpness:
 source_match:
   match: 0
   lossless: 0
-  basic_preset: 'medium'
   basic_deint:
     name: 'znedi'
     args:
       nsize: 1
       nns: 2
-  refined_preset: 'faster'
   refined_deint:
     name: 'znedi'
     args:
