@@ -70,12 +70,12 @@ class NoisePreset(Dict[str, Any], Enum):
     )
 
 
-class _P(NamedTuple):
+class _PresetTuple(NamedTuple):
     name: str
     i: int
 
 
-class Preset(_P, Enum):
+class Preset(_PresetTuple, Enum):
     # PLACEBO = 'placebo'
     # VERYSLOW = 'veryslow'
     # SLOWER = 'slower'
@@ -87,14 +87,14 @@ class Preset(_P, Enum):
     # SUPERFAST = 'superfast'
     # ULTRAFAST = 'ultrafast'
     # DRAFT = 'draft'
-    PLACEBO =   _P('placebo', 0)  # noqa: E222
-    VERYSLOW =  _P('veryslow', 1)  # noqa: E222
-    SLOWER =    _P('slower', 2)  # noqa: E222
-    SLOW =      _P('slow', 3)  # noqa: E222
-    MEDIUM =    _P('medium', 4)  # noqa: E222
-    FAST =      _P('fast', 5)  # noqa: E222
-    FASTER =    _P('faster', 6)  # noqa: E222
-    VERYFAST =  _P('veryfast', 7)  # noqa: E222
-    SUPERFAST = _P('superfast', 8)  # noqa: E222
-    ULTRAFAST = _P('ultrafast', 9)  # noqa: E222
-    DRAFT =     _P('draft', 10)  # noqa: E222
+    PLACEBO =   _PresetTuple('placebo', 0)  # noqa: E222
+    VERYSLOW =  _PresetTuple('veryslow', 1)  # noqa: E222
+    SLOWER =    _PresetTuple('slower', 2)  # noqa: E222
+    SLOW =      _PresetTuple('slow', 3)  # noqa: E222
+    MEDIUM =    _PresetTuple('medium', 4)  # noqa: E222
+    FAST =      _PresetTuple('fast', 5)  # noqa: E222
+    FASTER =    _PresetTuple('faster', 6)  # noqa: E222
+    VERYFAST =  _PresetTuple('veryfast', 7)  # noqa: E222
+    SUPERFAST = _PresetTuple('superfast', 8)  # noqa: E222
+    ULTRAFAST = _PresetTuple('ultrafast', 9)  # noqa: E222
+    DRAFT =     _PresetTuple('draft', 10)  # noqa: E222
