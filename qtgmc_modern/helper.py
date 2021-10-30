@@ -92,7 +92,7 @@ def inject_param(
 Nb = TypeVar('Nb', bound=Union[float, int])  # Number
 
 
-def clamp_value(val: Nb, min_val: Nb, max_val: Nb) -> Nb:
+def clamp_value(val: Nb, min_val: Optional[Nb], max_val: Optional[Nb]) -> Nb:
     """
     Clamp value val between min_val and max_val
 
@@ -101,4 +101,10 @@ def clamp_value(val: Nb, min_val: Nb, max_val: Nb) -> Nb:
     :param max_val:     Maximum value
     :return:            Clamped value
     """
-    return min_val if val < min_val else max_val if val > max_val else val
+    if min_val is not None and max_val is not None:
+        return min_val if val < min_val else max_val if val > max_val else val
+    if min_val is not None and max_val is None:
+        return min_val if val < min_val else val
+    if min_val is None and max_val is not None:
+        return max_val if val > max_val else val
+    return val
