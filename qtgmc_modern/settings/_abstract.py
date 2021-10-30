@@ -1,6 +1,4 @@
 
-
-# from _typeshed import SupportsKeysAndGetItem
 from abc import ABC
 from typing import Any, Dict, Iterator, MutableMapping, NoReturn
 
@@ -19,7 +17,8 @@ class LoggedSettings(MutableMapping[str, Any], ABC):
 
     def __setitem__(self, k: str, v: Any) -> None:
         self._data.__setitem__(k, v)
-        log_update((self.__class__.__name__, k), v)
+        if self._data.__getitem__(k) != v:
+            log_update((self.__class__.__name__, k), v)
 
     def __delitem__(self, v: str) -> NoReturn:
         raise NotImplementedError
