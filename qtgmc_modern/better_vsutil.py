@@ -32,6 +32,11 @@ def get_sample_type(clip: VideoNode, /) -> SampleType:
 
 
 @disallow_variable_format
+def get_peak(clip: VideoNode, /) -> int:
+    return 1 if get_sample_type(clip) == FLOAT else (1 << get_depth(clip)) - 1
+
+
+@disallow_variable_format
 def is_444(clip: VideoNode, /) -> bool:
     assert clip.format
     if all([clip.format.subsampling_w == 0, clip.format.subsampling_h == 0]):
