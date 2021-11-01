@@ -99,6 +99,18 @@ class QTGMC:
         if final_output is not None:
             qtgmc_core['final_output'] |= final_output
 
+        # Clamping core values
+        qtgmc_core['motion_search']['tr'] = clamp_value(qtgmc_core['motion_search']['tr'], 1, 2)
+        qtgmc_core['initial_output']['tr'] = clamp_value(qtgmc_core['initial_output']['tr'], 1, 2)
+        qtgmc_core['final_output']['tr'] = clamp_value(qtgmc_core['final_output']['tr'], 0, 3)
+        qtgmc_core['motion_search']['rep'] = clamp_value(qtgmc_core['motion_search']['rep'], 0, None)
+
+        # Core defaults
+        if self._settings['source_match']['match'] > 0:
+            if self._settings['core']['final_output']['tr'] <= 0:
+                # TR2 defaults always at least 1 when using source-match
+                self._settings['core']['final_output']['tr'] = 1
+
     def set_interpolation(
         self,
         deint: Optional[Deinterlacer] = None,
@@ -121,6 +133,8 @@ class QTGMC:
         ma = self._settings['motion_analysis']
         ma.update(kwargs)  # type: ignore
 
+        # Defaults values
+
         class _TrueMotionVals(NamedTuple):
             name: str
             truemotion: float
@@ -136,15 +150,56 @@ class QTGMC:
             if ma[v.name] is None:
                 ma[v.name] = v.truemotion if ma['truemotion'] else v.not_truemotion
 
+        # Clamping motion anal values
+        ma['searchpre'] = clamp_value(ma['searchpre'], 0, 3)
+        ma['subpel'] = clamp_value(ma['subpel'], 1, 4)
+        ma['subpel_inter'] = clamp_value(ma['subpel_inter'], 0, 2)
+        ma['blocksize'] = clamp_value(ma['blocksize'], 4, 32)
+        ma['overlap'] = clamp_value(ma['overlap'], 2, 16)
+        ma['search'] = clamp_value(ma['search'], 0, 7)
+        ma['search_param'] = clamp_value(ma['search_param'], 0, 7)
+        ma['pelsearch'] = clamp_value(ma['pelsearch'], 1, 4)
+        ma['lambda_'] = clamp_value(ma['lambda_'], 0, None)
+        ma['plevel'] = clamp_value(ma['plevel'], 0, 2)
+        ma['dct'] = clamp_value(ma['dct'], 0, 10)
+        ma['prog_sad_mask'] = clamp_value(ma['prog_sad_mask'], 0., None)
+
+
     def set_sharpness(self, **kwargs: Any) -> None:
         sharp = self._settings['sharpness']
         sharp.update(kwargs)  # type: ignore
-        if sharp['lrad'] <= 0:
-            sharp['lrad'] = 0
-            sharp['lmode'] = 0
+
+        # Sharpness defaults
         if sharp['mode'] <= 0:
             sharp['strength'] = 0.0
-        # if self._settings['source_match']['match'] > 0:
+        if self._settings['source_match']['match'] > 1:
+            # Default sharpness is 1.0, or 0.2 if using source-match
+            sharp['strength'] *= 0.2
+
+        # Clamping values
+        sharp['strength'] = clamp_value(sharp['strength'], 0., None)
+        sharp['mode'] = clamp_value(sharp['mode'], 0, 2)
+        sharp['lmode'] = clamp_value(sharp['lmode'], 0, 4)
+        sharp['lrad'] = clamp_value(sharp['lrad'], 0, None)
+        sharp['ovs'] = clamp_value(sharp['ovs'], 0, 255)
+        sharp['vthin'] = clamp_value(sharp['vthin'], 0., None)
+        sharp['bb'] = clamp_value(sharp['bb'], 0, 3)
+
+        # spatial_l = sharp['lmode'] in {1, 3}
+        # temporal_l = sharp['lmode'] in {2, 4}
+        # mul = 2 if temporal_l else 1.5 if spatial_l else 1
+
+        # ovs = scale_value_full(sharp['ovs'], 8, peak)
+
+        # strength_adj = (
+        #     sharp['strength'] * (
+        #         mul * (
+        #             0.2
+        #             + self._settings['core']['initial_output']['tr'] * 0.15
+        #             + self._settings['core']['final_output']['tr'] * 0.25
+        #         ) + (0.1 if sharp['mode'] == 1 else 0)
+        #     )
+        # )
 
     def set_source_match(
         self,
@@ -159,10 +214,6 @@ class QTGMC:
         sm = self._settings[root]
         if match is not None:
             sm['match'] = match
-            if match > 0:
-                if self._settings['core']['final_output']['tr'] <= 0:
-                    # TR2 defaults always at least 1 when using source-match
-                    self._settings['core']['final_output']['tr'] = 1
         if lossless is not None:
             sm['lossless'] = lossless
         if basic_deint is not None:
@@ -173,6 +224,12 @@ class QTGMC:
             sm['refined_tr'] = refined_tr
         if enhance is not None:
             sm['enhance'] = enhance
+
+        # Clamping values
+        sm['match'] = clamp_value(sm['match'], 0, 3)
+        sm['lossless'] = clamp_value(sm['lossless'], 0, 2)
+        sm['refined_tr'] = clamp_value(sm['refined_tr'], 0, 2)
+        sm['enhance'] = clamp_value(sm['enhance'], 0., None)
 
     def set_noise(
         self,
@@ -222,6 +279,41 @@ class QTGMC:
             noise['deint'] = deint.to_dict()
         if stabilise is not None:
             noise['stabilise'] = stabilise
+
+        # Clamping values
+        noise['mode'] = clamp_value(noise['mode'], 0, 2)
+        noise['tr'] = clamp_value(noise['tr'], 0, 2)
+        noise['strength'] = clamp_value(noise['strength'], 0., None)
+        noise['restore_before_final'] = clamp_value(noise['restore_before_final'], 0., 1.0)
+        noise['restore_after_final'] = clamp_value(noise['restore_after_final'], 0., 1.0)
+
+        # Add default settings
+
+    def process(self) -> None:
+        sttg = self._settings
+        ...
+
+    def _pre_processing(self) -> None:
+        ...
+
+    def _processing(self) -> None:
+        ...
+
+    def _noise_processing(self) -> None:
+        ...
+
+    def _interpolation_processing(self) -> None:
+        ...
+
+    def _basic_output_processing(self) -> None:
+        ...
+
+    def _restore_processing(self) -> None:
+        ...
+
+    def _post_processing(self) -> None:
+        ...
+
 
 
 def interpolate(clip: vs.VideoNode, tff: bool, deint: Deinterlacer,
