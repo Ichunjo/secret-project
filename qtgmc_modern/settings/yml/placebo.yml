@@ -82,3 +82,10 @@ noise:
     name: 'doubleweave'
     args: null
   stabilise: false
+
+motion_blur:
+  fps_divisor: 1
+  shutter_blur: 0
+  shutter_angle_src: 180
+  shutter_angle_out: 180
+  blur_limit: 4

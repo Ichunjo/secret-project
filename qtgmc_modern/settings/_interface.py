@@ -11,6 +11,7 @@ __all__ = [
     'SharpnessSettings',
     'SourceMatchSettings',
     'NoiseSettings',
+    'MotionBlurSettings',
 
     'Settings',
 
@@ -227,7 +228,7 @@ if TYPE_CHECKING:
 
 
     class SharpnessSettings(TypedDict):
-        """"""
+        """Sharp"""
         strength: float
         """
         How much to resharpen the temporally blurred clip.
@@ -310,7 +311,7 @@ if TYPE_CHECKING:
 
 
     class NoiseSettings(TypedDict):
-        """"""
+        """GRAIN"""
         mode: int
         """
         Bypass mode:
@@ -370,6 +371,64 @@ if TYPE_CHECKING:
         """
 
 
+    class MotionBlurSettings(TypedDict):
+        """
+        By default QTGMC outputs video at "double-rate", twice the frame rate of the source.
+        This is because there are two separate images (fields) in every frame,
+        which the deinterlacing process restores in full.
+        By setting `fps_divisor` to 2, every second frame is dropped
+        and the output frame rate is the same as the source ("single-rate")
+
+        Single-rate output may look a little stuttery, depending on how the source was filmed/created.
+        Adding motion blur to each frame can help with this, smoothing the feel of the slower rate playback.
+        This is done by setting `shutter_blur` to 1, 2 or 3,
+        then specifying the shutter angle that you wish the output to simulate.
+        However, as there may be some motion blur already in the source
+        you also need to specify/estimate the shutter angle used in the source.
+        Shutter angles range from 0 to 360, with 0 being perfectly sharp and 360 being fully blurred
+        from one frame to next (artificial output shutter angles > 360 are supported to a very limited degree).
+        Motion-blur can also be applied to double-rate output, but the effect is less noticeable.
+
+        As motion analysis is block-based, motion blur of an object can "bleed" into surrounding, more static areas.
+        This can be reduced using the slower `shutter_blur` modes or by increasing the `blur_limit` setting
+        (which is enabled and set to 4 by default).
+        Both repair methods may reduce the level of motion blur a little though.
+        In situations of complex motion the motion analysis can be incorrect, which can lead to inappropriate blurring.
+        """
+        fps_divisor: int
+        """
+        Cycle value in std.SelectEvery.
+        1 = Double-rate output, 2 = Single-rate output and so on.
+        Old "FPSDivisor"
+        """
+        shutter_blur: int
+        """
+        Enable shutter blur. Range from 0 to 3, see `ShutterBlur`.
+        Higher precisions reduce blur "bleeding" into static areas a little.
+        Old "ShutterBlur".
+        """
+        shutter_angle_src: int
+        """
+        Shutter angle used in source.
+        If necessary, estimate from motion blur seen in a single frame:
+        0=pin-sharp, 360=fully blurred from frame to frame.
+        Old "ShutterAngleSrc".
+        """
+        shutter_angle_out: int
+        """
+        Shutter angle to simulate in output.
+        Extreme values may be rejected (depends on other settings).
+        Cannot reduce motion blur already in the source.
+        Old "ShutterAngleOut".
+        """
+        blur_limit: int
+        """
+        Limit motion blur where motion lower than given value.
+        Increase to reduce blur "bleeding". 0=Off. Sensible range around 2-12.
+        Old "SBlurLimit".
+        """
+
+
     class Settings(TypedDict):
         core: CoreSettings
         motion_analysis: MotionAnalysisSettings
@@ -378,8 +437,7 @@ if TYPE_CHECKING:
         source_match: SourceMatchSettings
 
         noise: Optional[NoiseSettings]
-        # progressive
-        # shutter speed motion blur framerate
+        motion_blur: MotionBlurSettings
 
 else:
     class VSCallableD(LoggedSettings):
@@ -411,6 +469,10 @@ else:
 
 
     class NoiseSettings(LoggedSettings):
+        ...
+
+
+    class MotionBlurSettings(LoggedSettings):
         ...
 
 
@@ -524,6 +586,14 @@ class LosslessMode(IntEnum):
     OFF = 0
     AFTER_FINAL_TEMPORAL_SMOOTH = 1
     BEFORE_RESHARPENING = 2
+
+
+# Shutter blur
+class ShutterBlur(IntEnum):
+    OFF = 0
+    ON = 1
+    ON_SLOWER = 2
+    ON_SLOWEST = 3
 
 
 # InputType
