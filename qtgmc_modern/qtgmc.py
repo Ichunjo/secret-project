@@ -1,20 +1,32 @@
 
 from __future__ import annotations
+import math
 
-from types import MappingProxyType
-from typing import Any, Callable, NamedTuple, Optional, Tuple
+from typing import Any, Callable, NamedTuple, Optional, Tuple, TypedDict
 
 import vapoursynth as vs
 
-from .better_vsutil import get_depth, get_neutral, get_y, scale_value_full
+from .better_vsutil import get_depth, get_neutral, get_peak, get_y, scale_value_full
 from .filters import (Deinterlacer, Denoiser, NoiseDeint, deintd2class,
                       dend2class, noisedeintd2class)
 from .helper import clamp_value, merge_chroma
 from .logger import add_logger
 from .settings import (CoreParam, InputType, NoisePreset, NoiseSettings,
                        Preset, Settings, load_preset)
+from .types import SettingsView
 
 core = vs.core
+
+
+class _ExtraSharpnessSettings(NamedTuple):
+    spatial_l: bool
+    temporal_l: bool
+    ovs_scaled: float
+    strength_adj: float
+
+
+class _ExtraSettings(TypedDict, total=False):
+    sharp: _ExtraSharpnessSettings
 
 
 class QTGMC:
@@ -23,6 +35,7 @@ class QTGMC:
     _input_type: InputType
     _preset: Preset
     _settings: Settings
+    _extra_settings: _ExtraSettings
 
     log_info: bool
     deint: Optional[Deinterlacer]
@@ -32,17 +45,14 @@ class QTGMC:
     denoiser: Optional[Denoiser]
     noise_deint: Optional[NoiseDeint]
 
-    def __init__(
-        self, clip: vs.VideoNode,
-        preset: Preset = Preset.SLOWER, tff: bool = True,
-        input_type: InputType = InputType.INTERLACED_ONLY,
-        log_info: bool = True
-    ) -> None:
+    def __init__(self, clip: vs.VideoNode, preset: Preset = Preset.SLOWER, tff: bool = True,
+                 input_type: InputType = InputType.INTERLACED_ONLY, log_info: bool = True) -> None:
         self._pclip = clip
         self._tff = tff
         self._input_type = input_type
         self._preset = preset
         self._settings = load_preset(preset)
+        self._extra_settings = _ExtraSettings()
 
         self.deint = None
         self.deint_chroma = None
@@ -55,41 +65,41 @@ class QTGMC:
             add_logger()
 
     @property
-    def core(self) -> MappingProxyType[str, Any]:
-        return MappingProxyType(self._settings['core'])
+    def core(self) -> SettingsView:
+        return SettingsView(self._settings['core'])
 
     @property
-    def interpolation(self) -> MappingProxyType[str, Any]:
-        return MappingProxyType(self._settings['interpolation'])
+    def interpolation(self) -> SettingsView:
+        return SettingsView(self._settings['interpolation'])
 
     @property
-    def motion_analysis(self) -> MappingProxyType[str, Any]:
-        return MappingProxyType(self._settings['motion_analysis'])
+    def motion_analysis(self) -> SettingsView:
+        return SettingsView(self._settings['motion_analysis'])
 
     @property
-    def sharpness(self) -> MappingProxyType[str, Any]:
-        return MappingProxyType(self._settings['sharpness'])
+    def sharpness(self) -> SettingsView:
+        return SettingsView(self._settings['sharpness'])
 
     @property
-    def source_match(self) -> MappingProxyType[str, Any]:
-        return MappingProxyType(self._settings['source_match'])
+    def source_match(self) -> SettingsView:
+        return SettingsView(self._settings['source_match'])
 
     @property
-    def noise(self) -> Optional[MappingProxyType[str, Any]]:
+    def noise(self) -> Optional[SettingsView]:
         if (noise := self._settings['noise']) is None:
             return None
-        return MappingProxyType(noise)
+        return SettingsView(noise)
+
+    @property
+    def motion_blur(self) -> SettingsView:
+        return SettingsView(self._settings['motion_blur'])
 
     @property
     def clip(self) -> vs.VideoNode:
         return self._pclip
 
-    def set_core(
-        self,
-        motion_search: Optional[CoreParam] = None,
-        initial_output: Optional[CoreParam] = None,
-        final_output: Optional[CoreParam] = None
-    ) -> None:
+    def set_core(self, motion_search: Optional[CoreParam] = None, initial_output: Optional[CoreParam] = None,
+                 final_output: Optional[CoreParam] = None) -> None:
         root = 'core'
         qtgmc_core = self._settings[root]
         if motion_search is not None:
@@ -111,12 +121,8 @@ class QTGMC:
                 # TR2 defaults always at least 1 when using source-match
                 self._settings['core']['final_output']['tr'] = 1
 
-    def set_interpolation(
-        self,
-        deint: Optional[Deinterlacer] = None,
-        deint_chroma: Optional[Deinterlacer] = None,
-        ref: Optional[vs.VideoNode] = None
-    ) -> None:
+    def set_interpolation(self, deint: Optional[Deinterlacer] = None, deint_chroma: Optional[Deinterlacer] = None,
+                          ref: Optional[vs.VideoNode] = None) -> None:
         root = 'interpolation'
         inter = self._settings[root]
         if deint is not None:
@@ -164,6 +170,9 @@ class QTGMC:
         ma['dct'] = clamp_value(ma['dct'], 0, 10)
         ma['prog_sad_mask'] = clamp_value(ma['prog_sad_mask'], 0., None)
 
+        # Default values
+        if self._input_type < 2:
+            ma['prog_sad_mask'] = 0.0
 
     def set_sharpness(self, **kwargs: Any) -> None:
         sharp = self._settings['sharpness']
@@ -185,31 +194,26 @@ class QTGMC:
         sharp['vthin'] = clamp_value(sharp['vthin'], 0., None)
         sharp['bb'] = clamp_value(sharp['bb'], 0, 3)
 
-        # spatial_l = sharp['lmode'] in {1, 3}
-        # temporal_l = sharp['lmode'] in {2, 4}
-        # mul = 2 if temporal_l else 1.5 if spatial_l else 1
+        spatial_l = sharp['lmode'] in {1, 3}
+        temporal_l = sharp['lmode'] in {2, 4}
+        mul = 2 if temporal_l else 1.5 if spatial_l else 1
 
-        # ovs = scale_value_full(sharp['ovs'], 8, peak)
+        ovs = scale_value_full(sharp['ovs'], 8, get_peak(self._pclip))
 
-        # strength_adj = (
-        #     sharp['strength'] * (
-        #         mul * (
-        #             0.2
-        #             + self._settings['core']['initial_output']['tr'] * 0.15
-        #             + self._settings['core']['final_output']['tr'] * 0.25
-        #         ) + (0.1 if sharp['mode'] == 1 else 0)
-        #     )
-        # )
+        strength_adj = (
+            sharp['strength'] * (
+                mul * (
+                    0.2
+                    + self._settings['core']['initial_output']['tr'] * 0.15
+                    + self._settings['core']['final_output']['tr'] * 0.25
+                ) + (0.1 if sharp['mode'] == 1 else 0)
+            )
+        )
+        self._extra_settings['sharp'] = _ExtraSharpnessSettings(spatial_l, temporal_l, ovs, strength_adj)
 
-    def set_source_match(
-        self,
-        match: Optional[int] = None,
-        lossless: Optional[int] = None,
-        basic_deint: Optional[Deinterlacer] = None,
-        refined_deint: Optional[Deinterlacer] = None,
-        refined_tr: Optional[int] = None,
-        enhance: Optional[float] = None
-    ) -> None:
+    def set_source_match(self, match: Optional[int] = None, lossless: Optional[int] = None,
+                         basic_deint: Optional[Deinterlacer] = None, refined_deint: Optional[Deinterlacer] = None,
+                         refined_tr: Optional[int] = None, enhance: Optional[float] = None) -> None:
         root = 'source_match'
         sm = self._settings[root]
         if match is not None:
@@ -231,20 +235,12 @@ class QTGMC:
         sm['refined_tr'] = clamp_value(sm['refined_tr'], 0, 2)
         sm['enhance'] = clamp_value(sm['enhance'], 0., None)
 
-    def set_noise(
-        self,
-        preset: NoisePreset = NoisePreset.FAST,
-        mode: Optional[int] = None,
-        denoiser: Optional[Denoiser] = None,
-        use_mc: Optional[bool] = None,
-        tr: Optional[int] = None,
-        strength: Optional[float] = None,
-        chroma: Optional[bool] = None,
-        restore_before_final: Optional[float] = None,
-        restore_after_final: Optional[float] = None,
-        deint: Optional[NoiseDeint] = None,
-        stabilise: Optional[bool] = None
-    ) -> None:
+    def set_noise(self, ezdenoise: float = 0.0, ezkeepgrain: float = 0.0,
+                  preset: NoisePreset = NoisePreset.FAST, mode: Optional[int] = None, denoiser: Optional[Denoiser] = None,
+                  use_mc: Optional[bool] = None, tr: Optional[int] = None, strength: Optional[float] = None,
+                  chroma: Optional[bool] = None, restore_before_final: Optional[float] = None,
+                  restore_after_final: Optional[float] = None, deint: Optional[NoiseDeint] = None,
+                  stabilise: Optional[bool] = None) -> None:
         noise = self._settings['noise']
         if not noise:
             noise = NoiseSettings(
@@ -257,6 +253,19 @@ class QTGMC:
             self.noise_deint = None
         if preset is not None:
             noise.update(preset)  # type: ignore
+
+        if ezdenoise:
+            noise['mode'] = 1
+            noise['restore_before_final'] = 0.0
+            noise['restore_after_final'] = 0.0
+            noise['strength'] = ezdenoise
+
+        if ezkeepgrain:
+            noise['mode'] = 2
+            noise['restore_before_final'] = 0.3 * math.sqrt(ezkeepgrain)
+            noise['restore_after_final'] = 0.1 * math.sqrt(ezkeepgrain)
+            noise['strength'] = 4.0 * ezdenoise
+
         if mode is not None:
             noise['mode'] = mode
         if denoiser is not None:
@@ -288,6 +297,49 @@ class QTGMC:
         noise['restore_after_final'] = clamp_value(noise['restore_after_final'], 0., 1.0)
 
         # Add default settings
+        if noise['mode'] == 0:
+            noise['tr'] = 0
+            noise['restore_before_final'] = 0
+            noise['restore_after_final'] = 0
+        total_restore = noise['restore_before_final'] + noise['restore_after_final']
+        if total_restore == 0:
+            noise['stabilise'] = False
+        noise_td = [1, 3, 5][noise['tr']]
+        if noise['denoiser']['name'] in {'fft3d', 'neofft3d', 'FFT3D', 'NeoFFT3D'}:
+            noise_centre = scale_value_full(128.5, 8, get_depth(self._pclip))
+        else:
+            noise_centre = get_neutral(self._pclip)
+        # add show noise things
+
+    def set_motion_blur(self, fps_divisor: Optional[int] = None, shutter_blur: Optional[int] = None,
+                        shutter_angle_src: Optional[int] = None, shutter_angle_out: Optional[int] = None,
+                        blur_limit: Optional[int] = None) -> None:
+        mb = self._settings['motion_blur']
+        if fps_divisor is not None:
+            mb['fps_divisor'] = fps_divisor
+        if shutter_blur is not None:
+            mb['shutter_blur'] = shutter_blur
+        if shutter_angle_src is not None:
+            mb['shutter_angle_src'] = shutter_angle_src
+        if shutter_angle_out is not None:
+            mb['shutter_angle_out'] = shutter_angle_out
+        if blur_limit is not None:
+            mb['blur_limit'] = blur_limit
+
+        # Clamping values
+        mb['fps_divisor'] = clamp_value(mb['fps_divisor'], 1, None)
+        mb['shutter_blur'] = clamp_value(mb['shutter_blur'], 0, 3)
+        mb['shutter_angle_src'] %= 360
+        mb['shutter_angle_out'] %= 360
+        mb['blur_limit'] = clamp_value(mb['blur_limit'], 0, None)
+
+        # Default values
+        if mb['shutter_angle_out'] * mb['fps_divisor'] == mb['shutter_angle_src']:
+            mb['shutter_blur'] = 0
+
+
+    def max_tr(self) -> int:
+        ...
 
     def process(self) -> None:
         sttg = self._settings
