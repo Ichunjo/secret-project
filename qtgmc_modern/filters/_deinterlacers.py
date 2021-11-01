@@ -1,3 +1,6 @@
+"""
+Deinterlacing interface
+"""
 
 __all__ = [
     'Deinterlacer',

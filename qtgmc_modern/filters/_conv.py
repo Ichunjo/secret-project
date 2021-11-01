@@ -1,4 +1,6 @@
-
+"""
+Conversion functions between VSCallableD and the associated classes
+"""
 
 __all__ = [
     'deintd2class',

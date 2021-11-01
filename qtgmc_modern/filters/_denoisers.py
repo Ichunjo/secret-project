@@ -1,3 +1,7 @@
+"""
+Denoiser interface
+"""
+
 
 __all__ = [
     'Denoiser',

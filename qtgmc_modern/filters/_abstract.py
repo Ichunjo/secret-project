@@ -1,4 +1,6 @@
-
+"""
+Abstract filters interface
+"""
 
 from abc import ABC
 from typing import Any, Callable, ClassVar, Dict, Protocol, Type, TypeVar, cast
