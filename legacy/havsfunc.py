@@ -259,51 +259,52 @@ def QTGMC(
         if SMode <= 0:
             Sbb = 0
 
-        # Noise processing settings
-        if EZDenoise is not None and EZDenoise > 0 and EZKeepGrain is not None and EZKeepGrain > 0:
-            raise vs.Error("QTGMC: EZDenoise and EZKeepGrain cannot be used together")
-        if NoiseProcess is None:
-            if EZDenoise is not None and EZDenoise > 0:
-                NoiseProcess = 1
-            elif (EZKeepGrain is not None and EZKeepGrain > 0) or Preset in ['placebo', 'very slow']:
+        if True:  # Need to add those fucking default values
+            # Noise processing settings
+            if EZDenoise is not None and EZDenoise > 0 and EZKeepGrain is not None and EZKeepGrain > 0:
+                raise vs.Error("QTGMC: EZDenoise and EZKeepGrain cannot be used together")
+            if NoiseProcess is None:
+                if EZDenoise is not None and EZDenoise > 0:
+                    NoiseProcess = 1
+                elif (EZKeepGrain is not None and EZKeepGrain > 0) or Preset in ['placebo', 'very slow']:
+                    NoiseProcess = 2
+                else:
+                    NoiseProcess = 0
+            if GrainRestore is None:
+                if EZDenoise is not None and EZDenoise > 0:
+                    GrainRestore = 0.0
+                elif EZKeepGrain is not None and EZKeepGrain > 0:
+                    GrainRestore = 0.3 * math.sqrt(EZKeepGrain)
+                else:
+                    GrainRestore = [0.0, 0.7, 0.3][NoiseProcess]
+            if NoiseRestore is None:
+                if EZDenoise is not None and EZDenoise > 0:
+                    NoiseRestore = 0.0
+                elif EZKeepGrain is not None and EZKeepGrain > 0:
+                    NoiseRestore = 0.1 * math.sqrt(EZKeepGrain)
+                else:
+                    NoiseRestore = [0.0, 0.3, 0.1][NoiseProcess]
+            if Sigma is None:
+                if EZDenoise is not None and EZDenoise > 0:
+                    Sigma = EZDenoise
+                elif EZKeepGrain is not None and EZKeepGrain > 0:
+                    Sigma = 4.0 * EZKeepGrain
+                else:
+                    Sigma = 2.0
+            if isinstance(ShowNoise, bool):
+                ShowNoise = 10.0 if ShowNoise else 0.0
+            if ShowNoise > 0:
                 NoiseProcess = 2
-            else:
-                NoiseProcess = 0
-        if GrainRestore is None:
-            if EZDenoise is not None and EZDenoise > 0:
+                NoiseRestore = 1.0
+            if NoiseProcess <= 0:
+                NoiseTR = 0
                 GrainRestore = 0.0
-            elif EZKeepGrain is not None and EZKeepGrain > 0:
-                GrainRestore = 0.3 * math.sqrt(EZKeepGrain)
-            else:
-                GrainRestore = [0.0, 0.7, 0.3][NoiseProcess]
-        if NoiseRestore is None:
-            if EZDenoise is not None and EZDenoise > 0:
                 NoiseRestore = 0.0
-            elif EZKeepGrain is not None and EZKeepGrain > 0:
-                NoiseRestore = 0.1 * math.sqrt(EZKeepGrain)
-            else:
-                NoiseRestore = [0.0, 0.3, 0.1][NoiseProcess]
-        if Sigma is None:
-            if EZDenoise is not None and EZDenoise > 0:
-                Sigma = EZDenoise
-            elif EZKeepGrain is not None and EZKeepGrain > 0:
-                Sigma = 4.0 * EZKeepGrain
-            else:
-                Sigma = 2.0
-        if isinstance(ShowNoise, bool):
-            ShowNoise = 10.0 if ShowNoise else 0.0
-        if ShowNoise > 0:
-            NoiseProcess = 2
-            NoiseRestore = 1.0
-        if NoiseProcess <= 0:
-            NoiseTR = 0
-            GrainRestore = 0.0
-            NoiseRestore = 0.0
-        totalRestore = GrainRestore + NoiseRestore
-        if totalRestore <= 0:
-            StabilizeNoise = False
-        noiseTD = [1, 3, 5][NoiseTR]
-        noiseCentre = 128.5 * 2 ** (Input.format.bits_per_sample - 8) if Denoiser in ['fft3df', 'fft3dfilter'] else neutral
+            totalRestore = GrainRestore + NoiseRestore
+            if totalRestore <= 0:
+                StabilizeNoise = False
+            noiseTD = [1, 3, 5][NoiseTR]
+            noiseCentre = 128.5 * 2 ** (Input.format.bits_per_sample - 8) if Denoiser in ['fft3df', 'fft3dfilter'] else neutral
 
         # MVTools settings
         if Lambda is None:
@@ -768,11 +769,12 @@ def QTGMC(
             # f"SrchClipPP={SrchClipPP} | SubPel={SubPel} | SubPelInterp={SubPelInterp} | BlockSize={BlockSize} | Overlap={Overlap} | Search={Search} | SearchParam={SearchParam} | PelSearch={PelSearch} | ChromaMotion={ChromaMotion} | TrueMotion={TrueMotion} | Lambda={Lambda} | LSAD={LSAD} | PNew={PNew} | PLevel={PLevel} | GlobalMotion={GlobalMotion} | DCT={DCT} | ThSAD1={ThSAD1} | ThSAD2={ThSAD2} | ThSCD1={ThSCD1} | ThSCD2={ThSCD2} | ", '\n',
             # '\nSource match lossless: \n',
             # f"SourceMatch={SourceMatch} | MatchPreset='{MatchPreset}' | MatchEdi='{MatchEdi}' | MatchPreset2='{MatchPreset2}' | MatchEdi2='{MatchEdi2}' | MatchTR2={MatchTR2} | MatchEnhance={MatchEnhance} | Lossless={Lossless} | ", '\n',
-            '\nNoise bypass / denoising:\n',
-            f"NoiseProcess={NoiseProcess} | Denoiser='{Denoiser}' | FftThreads={FftThreads} | DenoiseMC={DenoiseMC} | NoiseTR={NoiseTR} | Sigma={Sigma} | ChromaNoise={ChromaNoise} | ShowNoise={ShowNoise} | GrainRestore={GrainRestore} | NoiseRestore={NoiseRestore} | NoiseDeint='{NoiseDeint}' | StabilizeNoise={StabilizeNoise} | ", '\n',
+            # '\nNoise bypass / denoising:\n',
+            # f"NoiseProcess={NoiseProcess} | Denoiser='{Denoiser}' | FftThreads={FftThreads} | DenoiseMC={DenoiseMC} | NoiseTR={NoiseTR} | Sigma={Sigma} | ChromaNoise={ChromaNoise} | ShowNoise={ShowNoise} | GrainRestore={GrainRestore} | NoiseRestore={NoiseRestore} | NoiseDeint='{NoiseDeint}' | StabilizeNoise={StabilizeNoise} | ", '\n',
             # '\nOther:\n',
             # f"InputType={InputType} | ProgSADMask={ProgSADMask} | FPSDivisor={FPSDivisor} | ", '\n',
-            # f"FPSDivisor={FPSDivisor} | ShutterBlur={ShutterBlur} | ShutterAngleSrc={ShutterAngleSrc} | ShutterAngleOut={ShutterAngleOut} | SBlurLimit={SBlurLimit} | Border={Border} | Precise={Precise} | Preset='{Preset}' | Tuning='{Tuning}' | ForceTR={ForceTR}", '\n',
+            '\nOther:\n',
+            f"FPSDivisor={FPSDivisor} | ShutterBlur={ShutterBlur} | ShutterAngleSrc={ShutterAngleSrc} | ShutterAngleOut={ShutterAngleOut} | SBlurLimit={SBlurLimit} | Border={Border} | Precise={Precise} | Preset='{Preset}' | Tuning='{Tuning}' | ForceTR={ForceTR}", '\n',
             # f"",
             # f"",
         )
