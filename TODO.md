@@ -5,3 +5,4 @@ Handle the logger when there is already one running in the environment
 
 Merge "Precise" to SharpnessSettings. It's basically a slower mode. Just need to add a new mode for that
 Do domething with ForceTR
+Scale overshoot for sharpness
